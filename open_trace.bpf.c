@@ -2,7 +2,7 @@
 // open_trace.bpf.c — eBPF kernel program to trace file I/O syscalls
 //
 // Traces: openat, read, write, close, stat/fstat
-// Filters by multiple PIDs (hash map, set from userspace).
+// Filters by multiple PIDs (hash map) or cgroup IDs (for Docker).
 // Reports TTY name so events can be correlated to terminals.
 // Events delivered via ring buffer.
 
@@ -36,6 +36,7 @@ struct event {
     __u32 flags;             // openat flags
     __s32 fd;                // file descriptor (read/write/close/fstat)
     __u64 size;              // bytes requested (read/write)
+    __u64 cgroup_id;         // cgroup ID (for container identification)
     char  comm[TASK_COMM_LEN];
     char  filename[MAX_FILENAME]; // openat filename or stat path
     char  tty[MAX_TTY_NAME];     // terminal name (e.g. "pts/0")
@@ -53,6 +54,14 @@ struct {
     __type(value, __u32);
 } target_pids SEC(".maps");
 
+// Hash map: key=cgroup_id, value=1 (presence). For Docker containers.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 16);
+    __type(key, __u64);
+    __type(value, __u32);
+} target_cgroups SEC(".maps");
+
 // Ring buffer for sending events to userspace (256 KB).
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -63,18 +72,25 @@ struct {
 // Helpers
 // -----------------------------------------------------------------
 
-// Check if current process PID is in our target set.
+// Check if current process matches our targets (by PID or cgroup).
 // Returns the PID if matched, 0 otherwise.
-static __always_inline __u32 check_target_pid(void)
+static __always_inline __u32 check_target(void)
 {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
 
+    // Check PID-based filter first
     __u32 *found = bpf_map_lookup_elem(&target_pids, &pid);
-    if (!found)
-        return 0;
+    if (found)
+        return pid;
 
-    return pid;
+    // Check cgroup-based filter (for Docker containers)
+    __u64 cgid = bpf_get_current_cgroup_id();
+    __u32 *cg_found = bpf_map_lookup_elem(&target_cgroups, &cgid);
+    if (cg_found)
+        return pid;
+
+    return 0;
 }
 
 // Read the TTY name from current->signal->tty->name via CO-RE.
@@ -118,7 +134,7 @@ struct sys_enter_openat_args {
 SEC("tracepoint/syscalls/sys_enter_openat")
 int trace_openat(struct sys_enter_openat_args *ctx)
 {
-    __u32 pid = check_target_pid();
+    __u32 pid = check_target();
     if (!pid)
         return 0;
 
@@ -126,11 +142,12 @@ int trace_openat(struct sys_enter_openat_args *ctx)
     if (!e)
         return 0;
 
-    e->pid   = pid;
-    e->type  = EVENT_OPENAT;
-    e->flags = (__u32)ctx->flags;
-    e->fd    = -1;
-    e->size  = 0;
+    e->pid       = pid;
+    e->type      = EVENT_OPENAT;
+    e->flags     = (__u32)ctx->flags;
+    e->fd        = -1;
+    e->size      = 0;
+    e->cgroup_id = bpf_get_current_cgroup_id();
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     bpf_probe_read_user_str(&e->filename, sizeof(e->filename), ctx->filename);
@@ -157,7 +174,7 @@ struct sys_enter_read_args {
 SEC("tracepoint/syscalls/sys_enter_read")
 int trace_read(struct sys_enter_read_args *ctx)
 {
-    __u32 pid = check_target_pid();
+    __u32 pid = check_target();
     if (!pid)
         return 0;
 
@@ -165,11 +182,12 @@ int trace_read(struct sys_enter_read_args *ctx)
     if (!e)
         return 0;
 
-    e->pid   = pid;
-    e->type  = EVENT_READ;
-    e->flags = 0;
-    e->fd    = (__s32)ctx->fd;
-    e->size  = (__u64)ctx->count;
+    e->pid       = pid;
+    e->type      = EVENT_READ;
+    e->flags     = 0;
+    e->fd        = (__s32)ctx->fd;
+    e->size      = (__u64)ctx->count;
+    e->cgroup_id = bpf_get_current_cgroup_id();
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     e->filename[0] = '\0';
@@ -196,7 +214,7 @@ struct sys_enter_write_args {
 SEC("tracepoint/syscalls/sys_enter_write")
 int trace_write(struct sys_enter_write_args *ctx)
 {
-    __u32 pid = check_target_pid();
+    __u32 pid = check_target();
     if (!pid)
         return 0;
 
@@ -204,11 +222,12 @@ int trace_write(struct sys_enter_write_args *ctx)
     if (!e)
         return 0;
 
-    e->pid   = pid;
-    e->type  = EVENT_WRITE;
-    e->flags = 0;
-    e->fd    = (__s32)ctx->fd;
-    e->size  = (__u64)ctx->count;
+    e->pid       = pid;
+    e->type      = EVENT_WRITE;
+    e->flags     = 0;
+    e->fd        = (__s32)ctx->fd;
+    e->size      = (__u64)ctx->count;
+    e->cgroup_id = bpf_get_current_cgroup_id();
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     e->filename[0] = '\0';
@@ -233,7 +252,7 @@ struct sys_enter_close_args {
 SEC("tracepoint/syscalls/sys_enter_close")
 int trace_close(struct sys_enter_close_args *ctx)
 {
-    __u32 pid = check_target_pid();
+    __u32 pid = check_target();
     if (!pid)
         return 0;
 
@@ -241,11 +260,12 @@ int trace_close(struct sys_enter_close_args *ctx)
     if (!e)
         return 0;
 
-    e->pid   = pid;
-    e->type  = EVENT_CLOSE;
-    e->flags = 0;
-    e->fd    = (__s32)ctx->fd;
-    e->size  = 0;
+    e->pid       = pid;
+    e->type      = EVENT_CLOSE;
+    e->flags     = 0;
+    e->fd        = (__s32)ctx->fd;
+    e->size      = 0;
+    e->cgroup_id = bpf_get_current_cgroup_id();
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     e->filename[0] = '\0';
@@ -271,7 +291,7 @@ struct sys_enter_newstat_args {
 SEC("tracepoint/syscalls/sys_enter_newstat")
 int trace_stat(struct sys_enter_newstat_args *ctx)
 {
-    __u32 pid = check_target_pid();
+    __u32 pid = check_target();
     if (!pid)
         return 0;
 
@@ -279,11 +299,12 @@ int trace_stat(struct sys_enter_newstat_args *ctx)
     if (!e)
         return 0;
 
-    e->pid   = pid;
-    e->type  = EVENT_STAT;
-    e->flags = 0;
-    e->fd    = -1;
-    e->size  = 0;
+    e->pid       = pid;
+    e->type      = EVENT_STAT;
+    e->flags     = 0;
+    e->fd        = -1;
+    e->size      = 0;
+    e->cgroup_id = bpf_get_current_cgroup_id();
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     bpf_probe_read_user_str(&e->filename, sizeof(e->filename), ctx->filename);
@@ -309,7 +330,7 @@ struct sys_enter_newfstat_args {
 SEC("tracepoint/syscalls/sys_enter_newfstat")
 int trace_fstat(struct sys_enter_newfstat_args *ctx)
 {
-    __u32 pid = check_target_pid();
+    __u32 pid = check_target();
     if (!pid)
         return 0;
 
@@ -317,11 +338,12 @@ int trace_fstat(struct sys_enter_newfstat_args *ctx)
     if (!e)
         return 0;
 
-    e->pid   = pid;
-    e->type  = EVENT_FSTAT;
-    e->flags = 0;
-    e->fd    = (__s32)ctx->fd;
-    e->size  = 0;
+    e->pid       = pid;
+    e->type      = EVENT_FSTAT;
+    e->flags     = 0;
+    e->fd        = (__s32)ctx->fd;
+    e->size      = 0;
+    e->cgroup_id = bpf_get_current_cgroup_id();
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     e->filename[0] = '\0';
