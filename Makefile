@@ -18,14 +18,18 @@ ARCH := $(shell uname -m | sed 's/x86_64/x86/' \
                            | sed 's/riscv64/riscv/' \
                            | sed 's/loongarch64/loongarch/')
 
+# Path to locally built libbpf (v1.5.0)
+LIBBPF_SRC   := ../libbpf/src
+LIBBPF_A     := $(LIBBPF_SRC)/libbpf.a
+
 # BPF compilation flags
 BPF_CFLAGS := -g -O2 -target bpf \
               -D__TARGET_ARCH_$(ARCH) \
-              -I.
+              -I. -I$(LIBBPF_SRC)
 
-# Userspace compilation flags
-USER_CFLAGS  := -g -O2 -Wall -I.
-USER_LDFLAGS := -lbpf -lelf -lz
+# Userspace compilation flags (use local libbpf headers + static lib)
+USER_CFLAGS  := -g -O2 -Wall -I. -I$(LIBBPF_SRC)
+USER_LDFLAGS := $(LIBBPF_A) -lelf -lz
 
 # ---------------------------------------------------------------
 # Phony targets
