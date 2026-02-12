@@ -116,6 +116,42 @@ static __always_inline void read_tty_name(char *buf, int buflen)
     BPF_CORE_READ_STR_INTO(buf, tty, name);
 }
 
+// Check if an fd refers to a regular file (not pipe/socket/tty/proc).
+// Walks: current->files->fdt->fd[fd]->f_inode->i_mode
+static __always_inline int is_regular_file(int fd)
+{
+    if (fd < 0)
+        return 0;
+
+    struct task_struct *task = (void *)bpf_get_current_task();
+
+    struct files_struct *files = BPF_CORE_READ(task, files);
+    if (!files)
+        return 0;
+
+    struct fdtable *fdt = BPF_CORE_READ(files, fdt);
+    if (!fdt)
+        return 0;
+
+    unsigned int max_fds = BPF_CORE_READ(fdt, max_fds);
+    if ((unsigned int)fd >= max_fds)
+        return 0;
+
+    struct file **fd_array = BPF_CORE_READ(fdt, fd);
+    struct file *f = NULL;
+    bpf_probe_read_kernel(&f, sizeof(f), &fd_array[fd]);
+    if (!f)
+        return 0;
+
+    struct inode *inode = BPF_CORE_READ(f, f_inode);
+    if (!inode)
+        return 0;
+
+    unsigned short i_mode = BPF_CORE_READ(inode, i_mode);
+    // S_ISREG: (mode & 0170000) == 0100000
+    return (i_mode & 0170000) == 0100000;
+}
+
 // -----------------------------------------------------------------
 // Tracepoint: sys_enter_openat
 // -----------------------------------------------------------------
@@ -178,6 +214,10 @@ int trace_read(struct sys_enter_read_args *ctx)
     if (!pid)
         return 0;
 
+    // Only trace reads on regular files
+    if (!is_regular_file((__s32)ctx->fd))
+        return 0;
+
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (!e)
         return 0;
@@ -218,6 +258,10 @@ int trace_write(struct sys_enter_write_args *ctx)
     if (!pid)
         return 0;
 
+    // Only trace writes on regular files
+    if (!is_regular_file((__s32)ctx->fd))
+        return 0;
+
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (!e)
         return 0;
@@ -254,6 +298,10 @@ int trace_close(struct sys_enter_close_args *ctx)
 {
     __u32 pid = check_target();
     if (!pid)
+        return 0;
+
+    // Only trace close on regular files
+    if (!is_regular_file((__s32)ctx->fd))
         return 0;
 
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
@@ -332,6 +380,10 @@ int trace_fstat(struct sys_enter_newfstat_args *ctx)
 {
     __u32 pid = check_target();
     if (!pid)
+        return 0;
+
+    // Only trace fstat on regular files
+    if (!is_regular_file((__s32)ctx->fd))
         return 0;
 
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
