@@ -1,0 +1,18 @@
+version: "3.3"
+
+services:
+  container-a:
+    image: ubuntu:22.04
+    container_name: container-a
+    hostname: container-a
+    stdin_open: true
+    tty: true
+    command: bash
+
+  container-b:
+    image: ubuntu:22.04
+    container_name: container-b
+    hostname: container-b
+    stdin_open: true
+    tty: true
+    command: bash
