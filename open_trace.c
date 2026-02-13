@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
-// open_trace.c — Userspace program for the file I/O tracer
+// open_trace.c — Userspace program for the file I/O + network tracer
 //
 // Usage:  sudo ./open_trace <PID1> [PID2] ...
 //    or:  sudo ./open_trace --docker <container1> [container2] ...
 //
 // Loads the BPF object, inserts target PIDs or cgroup IDs into BPF
 // maps, attaches all tracepoint programs, and polls the ring buffer.
-// In --docker mode, events are labeled with the container name.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +15,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <time.h>
+#include <arpa/inet.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
 #include <bpf/libbpf.h>
@@ -30,12 +30,18 @@
 #define MAX_TTY_NAME   32
 
 enum event_type {
-    EVENT_OPENAT = 0,
-    EVENT_READ   = 1,
-    EVENT_WRITE  = 2,
-    EVENT_CLOSE  = 3,
-    EVENT_STAT   = 4,
-    EVENT_FSTAT  = 5,
+    EVENT_OPENAT  = 0,
+    EVENT_READ    = 1,
+    EVENT_WRITE   = 2,
+    EVENT_CLOSE   = 3,
+    EVENT_STAT    = 4,
+    EVENT_FSTAT   = 5,
+    EVENT_SOCKET  = 6,
+    EVENT_CONNECT = 7,
+    EVENT_ACCEPT  = 8,
+    EVENT_BIND    = 9,
+    EVENT_SENDTO  = 10,
+    EVENT_RECVFROM= 11,
 };
 
 struct event {
@@ -45,6 +51,10 @@ struct event {
     __s32 fd;
     __u64 size;
     __u64 cgroup_id;
+    __u16 af;
+    __u16 port;
+    __u32 addr4;
+    __u8  addr6[16];
     char  comm[TASK_COMM_LEN];
     char  filename[MAX_FILENAME];
     char  tty[MAX_TTY_NAME];
@@ -82,13 +92,7 @@ static const char *lookup_container(__u64 cgroup_id)
 }
 
 // -----------------------------------------------------------------
-// Resolve Docker container → cgroup ID
-//
-// 1. Get container PID via docker inspect
-// 2. Read /proc/<PID>/cgroup to find the cgroup path
-// 3. Stat the cgroup directory to get its inode number
-//    (bpf_get_current_cgroup_id() returns the inode of the
-//     cgroup v2 unified hierarchy entry)
+// Docker helpers
 // -----------------------------------------------------------------
 static __u32 get_docker_pid(const char *name)
 {
@@ -118,20 +122,15 @@ static __u64 get_cgroup_id_for_pid(__u32 pid)
     if (!f)
         return 0;
 
-    // Find the cgroup v2 unified entry "0::<path>"
-    // or any cgroup v1 entry with "docker" in the path
     char cgroup_path[256] = {0};
     while (fgets(line, sizeof(line), f)) {
-        // Remove trailing newline
         char *nl = strchr(line, '\n');
         if (nl) *nl = '\0';
 
-        // Prefer cgroup v2 unified hierarchy: "0::<path>"
         if (strncmp(line, "0::", 3) == 0) {
             strncpy(cgroup_path, line + 3, sizeof(cgroup_path) - 1);
             break;
         }
-        // Fallback: cgroup v1 with "docker" in path
         if (strstr(line, "docker") && cgroup_path[0] == '\0') {
             char *third_colon = strchr(line, ':');
             if (third_colon) third_colon = strchr(third_colon + 1, ':');
@@ -145,13 +144,11 @@ static __u64 get_cgroup_id_for_pid(__u32 pid)
     if (cgroup_path[0] == '\0')
         return 0;
 
-    // Try multiple cgroup filesystem paths to find the directory
-    // and get its inode number (which equals bpf_get_current_cgroup_id())
     const char *prefixes[] = {
-        "/sys/fs/cgroup/unified",     // cgroup v2 on hybrid systems
-        "/sys/fs/cgroup",             // cgroup v2 pure
-        "/sys/fs/cgroup/memory",      // cgroup v1 memory controller
-        "/sys/fs/cgroup/pids",        // cgroup v1 pids controller
+        "/sys/fs/cgroup/unified",
+        "/sys/fs/cgroup",
+        "/sys/fs/cgroup/memory",
+        "/sys/fs/cgroup/pids",
         NULL,
     };
 
@@ -175,13 +172,19 @@ static __u64 get_cgroup_id_for_pid(__u32 pid)
 static const char *type_str(enum event_type t)
 {
     switch (t) {
-    case EVENT_OPENAT: return "OPENAT";
-    case EVENT_READ:   return "READ";
-    case EVENT_WRITE:  return "WRITE";
-    case EVENT_CLOSE:  return "CLOSE";
-    case EVENT_STAT:   return "STAT";
-    case EVENT_FSTAT:  return "FSTAT";
-    default:           return "???";
+    case EVENT_OPENAT:  return "OPENAT";
+    case EVENT_READ:    return "READ";
+    case EVENT_WRITE:   return "WRITE";
+    case EVENT_CLOSE:   return "CLOSE";
+    case EVENT_STAT:    return "STAT";
+    case EVENT_FSTAT:   return "FSTAT";
+    case EVENT_SOCKET:  return "SOCKET";
+    case EVENT_CONNECT: return "CONNECT";
+    case EVENT_ACCEPT:  return "ACCEPT";
+    case EVENT_BIND:    return "BIND";
+    case EVENT_SENDTO:  return "SENDTO";
+    case EVENT_RECVFROM:return "RECVFROM";
+    default:            return "???";
     }
 }
 
@@ -222,6 +225,51 @@ static const char *timestamp(void)
     snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%03ld",
              tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec / 1000000);
     return buf;
+}
+
+// Format an address family name
+static const char *af_str(__u16 af)
+{
+    switch (af) {
+    case AF_INET:   return "IPv4";
+    case AF_INET6:  return "IPv6";
+    case 1:         return "UNIX";
+    case 16:        return "NETLINK";
+    case 17:        return "PACKET";
+    default:        return "?";
+    }
+}
+
+// Format a socket type name
+static const char *socktype_str(__u16 t)
+{
+    switch (t & 0xF) {    // mask off SOCK_NONBLOCK/SOCK_CLOEXEC
+    case 1:  return "STREAM";
+    case 2:  return "DGRAM";
+    case 3:  return "RAW";
+    case 5:  return "SEQPACKET";
+    default: return "?";
+    }
+}
+
+// Format an IPv4 or IPv6 address + port into buf
+static void format_addr(char *buf, int buflen,
+                        __u16 af, __u32 addr4, const __u8 *addr6,
+                        __u16 port)
+{
+    char addrbuf[INET6_ADDRSTRLEN];
+
+    if (af == AF_INET) {
+        inet_ntop(AF_INET, &addr4, addrbuf, sizeof(addrbuf));
+        snprintf(buf, buflen, "%s:%u", addrbuf, port);
+    } else if (af == AF_INET6) {
+        inet_ntop(AF_INET6, addr6, addrbuf, sizeof(addrbuf));
+        snprintf(buf, buflen, "[%s]:%u", addrbuf, port);
+    } else if (af > 0) {
+        snprintf(buf, buflen, "af=%u port=%u", af, port);
+    } else {
+        buf[0] = '\0';
+    }
 }
 
 // -----------------------------------------------------------------
@@ -269,7 +317,10 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-truncation"
     char detail[512];
+    char addrbuf[128];
+
     switch (e->type) {
+    // --- File I/O events ---
     case EVENT_OPENAT:
         snprintf(detail, sizeof(detail), "flags=%s file=%s",
                  decode_flags(e->flags), e->filename);
@@ -291,6 +342,43 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
     case EVENT_FSTAT:
         snprintf(detail, sizeof(detail), "fd=%d", e->fd);
         break;
+
+    // --- Network events ---
+    case EVENT_SOCKET:
+        snprintf(detail, sizeof(detail), "family=%s type=%s",
+                 af_str(e->flags >> 16),
+                 socktype_str(e->flags & 0xFFFF));
+        break;
+    case EVENT_CONNECT:
+        format_addr(addrbuf, sizeof(addrbuf),
+                    e->af, e->addr4, e->addr6, e->port);
+        snprintf(detail, sizeof(detail), "fd=%d → %s",
+                 e->fd, addrbuf[0] ? addrbuf : "?");
+        break;
+    case EVENT_ACCEPT:
+        snprintf(detail, sizeof(detail), "listen_fd=%d", e->fd);
+        break;
+    case EVENT_BIND:
+        format_addr(addrbuf, sizeof(addrbuf),
+                    e->af, e->addr4, e->addr6, e->port);
+        snprintf(detail, sizeof(detail), "fd=%d addr=%s",
+                 e->fd, addrbuf[0] ? addrbuf : "?");
+        break;
+    case EVENT_SENDTO:
+        format_addr(addrbuf, sizeof(addrbuf),
+                    e->af, e->addr4, e->addr6, e->port);
+        if (addrbuf[0])
+            snprintf(detail, sizeof(detail), "fd=%d size=%llu → %s",
+                     e->fd, (unsigned long long)e->size, addrbuf);
+        else
+            snprintf(detail, sizeof(detail), "fd=%d size=%llu",
+                     e->fd, (unsigned long long)e->size);
+        break;
+    case EVENT_RECVFROM:
+        snprintf(detail, sizeof(detail), "fd=%d size=%llu",
+                 e->fd, (unsigned long long)e->size);
+        break;
+
     default:
         detail[0] = '\0';
         break;
@@ -341,7 +429,8 @@ int main(int argc, char **argv)
             "Usage: %s <PID1> [PID2] ...\n"
             "       %s --docker <container1> [container2] ...\n"
             "\n"
-            "  PID mode:    trace specific PIDs (by TTY)\n"
+            "  Trace file I/O + network events.\n"
+            "  PID mode:    trace specific PIDs\n"
             "  Docker mode: trace all processes in Docker containers\n",
             argv[0], argv[0]);
         return 1;
@@ -356,37 +445,26 @@ int main(int argc, char **argv)
         }
     }
 
-    // Set up libbpf error/debug callback
     libbpf_set_print(libbpf_print_fn);
-
-    // Bump RLIMIT_MEMLOCK for BPF map memory
     bump_memlock_rlimit();
-
-    // Register signal handlers for clean exit
     signal(SIGINT,  sig_handler);
     signal(SIGTERM, sig_handler);
 
-    // ----------------------------------------------------------
     // 1. Open the BPF skeleton
-    // ----------------------------------------------------------
     skel = open_trace_bpf__open();
     if (!skel) {
         fprintf(stderr, "Failed to open BPF skeleton\n");
         return 1;
     }
 
-    // ----------------------------------------------------------
-    // 2. Load & verify the BPF programs and maps
-    // ----------------------------------------------------------
+    // 2. Load & verify BPF programs and maps
     err = open_trace_bpf__load(skel);
     if (err) {
         fprintf(stderr, "Failed to load BPF skeleton: %d\n", err);
         goto cleanup;
     }
 
-    // ----------------------------------------------------------
-    // 3. Set up targets (PIDs or Docker container cgroups)
-    // ----------------------------------------------------------
+    // 3. Set up targets
     if (docker_mode) {
         int cg_map_fd = bpf_map__fd(skel->maps.target_cgroups);
         __u32 val = 1;
@@ -450,18 +528,14 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    // ----------------------------------------------------------
-    // 4. Attach the BPF programs to their tracepoints
-    // ----------------------------------------------------------
+    // 4. Attach BPF programs
     err = open_trace_bpf__attach(skel);
     if (err) {
         fprintf(stderr, "Failed to attach BPF programs: %d\n", err);
         goto cleanup;
     }
 
-    // ----------------------------------------------------------
-    // 5. Create the ring buffer manager
-    // ----------------------------------------------------------
+    // 5. Create ring buffer
     rb = ring_buffer__new(bpf_map__fd(skel->maps.events),
                           handle_event, NULL, NULL);
     if (!rb) {
@@ -471,11 +545,9 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    // ----------------------------------------------------------
-    // 6. Poll the ring buffer for events
-    // ----------------------------------------------------------
-    printf("\nTracing file I/O for %d target(s)... Hit Ctrl-C to stop.\n\n",
-           total_targets);
+    // 6. Poll
+    printf("\nTracing file I/O + network for %d target(s)... "
+           "Hit Ctrl-C to stop.\n\n", total_targets);
     printf("%-12s %-8s %-14s %-16s %-8s %s\n",
            "TIME", "PID", "SOURCE", "COMM", "TYPE", "DETAILS");
     printf("%-12s %-8s %-14s %-16s %-8s %s\n",
@@ -484,7 +556,7 @@ int main(int argc, char **argv)
            "----------------------------------------");
 
     while (!exiting) {
-        err = ring_buffer__poll(rb, 100 /* timeout ms */);
+        err = ring_buffer__poll(rb, 100);
         if (err == -EINTR) {
             err = 0;
             break;
