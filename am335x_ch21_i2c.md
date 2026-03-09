@@ -262,3 +262,51 @@ The following tables detail the connectivity and resource allocation for the I2C
 * [cite_start]**Transmit DMA:** Automatically asserted when the transmit FIFO is empty[cite: 537]. [cite_start]De-asserted when the number of bytes in the threshold register (`I2C_BUF.TXTHRS+1`) has been written by the DMA, by setting `I2C_DMATXENABLE_CLR.DMATX_ENABLE_CLEAR`[cite: 538].
 * [cite_start]**Thresholds & Clearing:** * In I2C Slave TX Mode, the TX FIFO threshold should be set to 1 (`I2C_BUF.TXTRSH = 0`), since the length of the transfer may not be known at configuration time[cite: 576]. 
     * [cite_start]The I2C module offers the possibility to the user to clear the RX or TX FIFO using `I2C_BUF.RXFIFO_CLR` and `I2C_BUF.TXFIFO_CLR` registers, which act like software reset for the FIFOs[cite: 581, 582].
+
+# 21.3 Functional Description (Continued)
+
+## 21.3.14.4 Draining Feature
+[cite_start]The Draining Feature is implemented by the I2C core for handling the end of transfers whose length is not a multiple of the FIFO threshold value, and offers the possibility to transfer the remaining amount of bytes (since the threshold is not reached)[cite: 598]. [cite_start]Note that this feature prevents the CPU or the DMA controller from attempting more FIFO accesses than necessary (for example, to generate at the end of a transfer a DMA RX request having in the FIFO fewer bytes than the configured DMA transfer length)[cite: 599]. [cite_start]Otherwise, an Access Error interrupt will be generated (see `I2C_IRQSTATUS_RAW.AERR` interrupt)[cite: 600]. 
+
+[cite_start]The Draining mechanism will generate an interrupt (`I2C_IRQSTATUS_RAW.RDR` or `I2C_IRQSTATUS_RAW.XDR`) at the end of the transfer informing the CPU that it needs to check the amount of data left to be transferred (`I2C_BUFSTAT.TXSTAT` or `RXSTAT`) and to enable the Draining Feature of the DMA controller if DMA mode is enabled (by re-configuring the DMA transfer length according to this value), or perform only the required number of data accesses if DMA mode is disabled[cite: 601].
+
+* [cite_start]**Receiving Mode (Master or Slave):** If the RX FIFO threshold is not reached but the transfer was ended on the I2C bus and there is still data left in the FIFO (less than the threshold), the receive draining interrupt (`I2C_IRQSTATUS_RAW.RDR`) will be asserted to inform the local host that it can read the amount of data in the FIFO (`I2C_BUFSTAT.RXSTAT`)[cite: 602]. The CPU will perform a number of data read accesses equal to the `RXSTAT` value (if in interrupt or polling mode) or re-configure the DMA controller with the required value in order to drain the FIFO[cite: 603].
+* [cite_start]**Master Transmit Mode:** If the TX FIFO threshold is not reached but the amount of data remaining to be written in the FIFO is less than `TXTRSH`, the transmit draining interrupt (`I2C_IRQSTATUS_RAW.XDR`) will be asserted to inform the local host that it can read the amount of data remained to be written in the TX FIFO (`I2C_BUFSTAT.TXSTAT`)[cite: 604]. The CPU will need to write the required number of data bytes (specified by `TXSTAT` value) or re-configure the DMA controller with the required value in order to transfer the last bytes to the FIFO[cite: 605].
+
+> [cite_start]**Note:** In master mode, the CPU can alternatively skip the checking of `TXSTAT` and `RXSTAT` values since it can obtain this information internally (by computing `DATACOUNT` modulo `TX/RXTHRSH`)[cite: 606].
+
+[cite_start]The draining feature is disabled by default, and it can be enabled using `I2C_IRQENABLE_SET.XDR_IE` or `I2C_IRQENABLE_SET.RDR_IE` registers (default disabled) only for transfers with lengths not equal to the threshold value[cite: 607].
+
+---
+
+## 21.3.15 How to Program I2C
+
+### 21.3.15.1 Module Configuration Before Enabling the Module
+1. [cite_start]Program the prescaler to obtain an approximately 12-MHz I2C module clock (`I2C_PSC = x`; this value is to be calculated and is dependent on the System clock frequency)[cite: 610].
+2. [cite_start]Program the I2C clock to obtain 100 Kbps or 400 Kbps (`SCLL = x` and `SCLH = x`: these values are to be calculated and are dependent on the System clock frequency)[cite: 611, 612].
+3. [cite_start]Configure its own address (`I2C_OA = x`) - only in case of I2C operating mode (F/S mode)[cite: 613].
+4. [cite_start]Take the I2C module out of reset (`I2C_CON:I2C_EN = 1`)[cite: 614].
+
+### 21.3.15.2 Initialization Procedure
+1. [cite_start]Configure the I2C mode register (`I2C_CON`) bits[cite: 616].
+2. [cite_start]Enable interrupt masks (`I2C_IRQENABLE_SET`), if using interrupt for transmit/receive data[cite: 617].
+3. [cite_start]Enable the DMA (`I2C_BUF` and `I2C_DMA/RX/TX/ENABLE_SET` and program the DMA controller) - only in case of I2C operating mode (F/S mode), if using DMA for transmit/receive data[cite: 618, 619].
+
+### 21.3.15.3 Configure Slave Address and DATA Counter Registers
+[cite_start]In master mode, configure the slave address (`I2C_SA = x`) and the number of bytes associated with the transfer (`I2C_CNT = x`)[cite: 621].
+
+### 21.3.15.4 Initiate a Transfer
+[cite_start]Poll the bus busy (BB) bit in the I2C status register (`I2C_IRQSTATUS_RAW`)[cite: 631]. [cite_start]If it is cleared to 0 (bus not busy), configure START/STOP (`I2C_CON: STT/I2C_CON: STP` condition to initiate a transfer) - only in case of I2C operating mode (F/S mode)[cite: 632].
+
+### 21.3.15.5 Receive Data
+[cite_start]Poll the receive data ready interrupt flag bit (RRDY) in the I2C status register (`I2C_IRQSTATUS_RAW`), use the RRDY interrupt (`I2C_IRQENABLE_SET.RRDY_IE` set) or use the DMA RX (`I2C_BUF.RDMA_EN` set together with `I2C_DMARXENABLE_SET`) to read the received data in the data receive register (`I2C_DATA`)[cite: 634]. [cite_start]Use the draining feature (`I2C_IRQSTATUS_RAW.RDR` enabled by `I2C_IRQENABLE_SET.RDR_IE`) if the transfer length is not equal to the FIFO threshold[cite: 635].
+
+### 21.3.15.6 Transmit Data
+[cite_start]Poll the transmit data ready interrupt flag bit (XRDY) in the I2C status register (`I2C_IRQSTATUS_RAW`), use the XRDY interrupt (`I2C_IRQENABLE_SET.XRDY_IE` set) or use the DMA TX (`I2C_BUF.XDMA_EN` set together with `I2C_DMATXENABLE_SET`) to write data into the data transmit register (`I2C_DATA`)[cite: 638]. [cite_start]Use the draining feature (`I2C_IRQSTATUS_RAW.XDR` enabled by `I2C_IRQENABLE_SET.XDR_IE`) if the transfer length is not equal to the FIFO threshold[cite: 639].
+
+---
+
+## 21.3.16 I2C Behavior During Emulation
+[cite_start]To configure the I2C to stop during emulation suspend events (for example, debugger breakpoints), set up the I2C and the Debug Subsystem[cite: 641]:
+1. Set `I2C_SYSTEST.FREE = 0`. [cite_start]This will allow the Suspend_Control signal from the Debug Subsystem to stop and start the I2C[cite: 642]. [cite_start]Note that if `FREE = 1`, the Suspend_Control signal is ignored and the I2C is free running regardless of any debug suspend event[cite: 643]. [cite_start]This FREE bit gives local control from a module perspective to gate the suspend signal coming from the Debug Subsystem[cite: 644].
+2. [cite_start]Set the appropriate `xxx_Suspend_Control` register = `0x9` as described in Section 27.1.1.1, Debug Suspend Support for Peripherals[cite: 645]. [cite_start]Choose the register appropriate to the peripheral you want to suspend during a suspend event[cite: 646].
