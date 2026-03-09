@@ -101,3 +101,50 @@ The following tables detail the connectivity and resource allocation for the I2C
 ### Hardware Implementation Recommendations
 * [cite_start]**Input Enabling:** The associated `CONF_<module>_<pin>_RXACTIVE` bit must be set to 1 to enable the inputs back to the module[cite: 121].
 * [cite_start]**Signal Integrity:** It is recommended to place a 33-ohm re
+
+# [cite_start]21.3 Functional Description [cite: 131]
+
+## [cite_start]21.3.1 Functional Block Diagram [cite: 132]
+[cite_start]The I2C peripheral consists of the following primary blocks: [cite: 159]
+* [cite_start]**Serial Interface:** Includes one data pin (`I2C_SDA`) and one clock pin (`I2C_SCL`). [cite: 160]
+* [cite_start]**Data Registers:** Temporarily hold receive and transmit data traveling between the `I2C_SDA` pin and the CPU or DMA controller. [cite: 161]
+* [cite_start]**Control and Status Registers:** Manage module operation and report state. [cite: 162]
+* [cite_start]**Peripheral Data Bus Interface:** Enables the CPU and DMA controller to access the I2C peripheral registers. [cite: 163]
+* [cite_start]**Clock Synchronizer:** Synchronizes the I2C input clock (from the processor clock generator) with the `I2C_SCL` pin, and synchronizes data transfers with masters of different clock speeds. [cite: 164]
+* [cite_start]**Prescaler:** Divides down the input clock driven to the I2C peripheral. [cite: 165]
+* [cite_start]**Noise Filter:** Located on each of the two pins, `I2C_SDA` and `I2C_SCL`. [cite: 166]
+* [cite_start]**Arbitrator and Interrupt Logic:** Handles arbitration between the I2C peripheral (when acting as a master) and other masters, and generates interrupts for the CPU. [cite: 167]
+* [cite_start]**DMA Event Logic:** Sends an interrupt to the CPU upon data reception and transmission. [cite: 168]
+
+## [cite_start]21.3.2 I2C Master/Slave Controller Signals [cite: 169]
+[cite_start]Data is communicated to devices interfacing with the I2C via the serial data line (SDA) and the serial clock line (SCL). [cite: 170]
+* [cite_start]**Bi-directional Pins:** Both SDA and SCL are bi-directional pins. [cite: 172] [cite_start]They must be connected to a positive supply voltage via a pull-up resistor. [cite: 172]
+* [cite_start]**Bus State:** When the bus is free, both pins are high. [cite: 173]
+* [cite_start]**Driver Type:** The driver of these two pins has an open drain to perform the required wired-AND function. [cite: 173]
+
+### Table 21-6. [cite_start]Signal Pads [cite: 194]
+| Name | Default Operating Mode | Description |
+| :--- | :--- | :--- |
+| **I2C_SCL** | In/Out | I2C serial CLK line. Open-drain output buffer. [cite_start]Requires external pull-up resistor (Rp). [cite: 191] |
+| **I2C_SDA** | In/Out | I2C serial data line. Open-drain output buffer. [cite_start]Requires external pull-up resistor (Rp). [cite: 191] |
+
+---
+
+## [cite_start]21.3.3 I2C Reset [cite: 193]
+[cite_start]The I2C module can be reset in the following three ways: [cite: 195]
+1.  [cite_start]**System Reset (`PIRSTNA = 0`):** A device reset causes the system reset. [cite: 196] [cite_start]All registers are reset to power up reset values. [cite: 197]
+2.  [cite_start]**Software Reset:** Triggered by setting the `SRST` bit in the `I2C_SYSC` register. [cite: 198] [cite_start]This has exactly the same action on the module logic as the system bus reset. [cite: 199] [cite_start]All registers are reset to power up reset values. [cite: 200]
+3.  [cite_start]**Module Reset Control (`I2C_EN` bit):** The `I2C_EN` bit in the `I2C_CON` register can be used to hold the I2C module in reset. [cite: 200] [cite_start]When the system bus reset is removed (`PIRSTNA=1`), `I2C_EN=0` keeps the functional part of the I2C module in reset state and all configuration registers can be accessed. [cite: 201] [cite_start]Setting `I2C_EN=0` does not reset the registers to power up reset values. [cite: 202]
+
+### Table 21-7. [cite_start]Reset State of I2C Signals [cite: 204]
+| Pin | I/O/Z | System Reset | (`I2C_EN = 0`) |
+| :--- | :--- | :--- | :--- |
+| **SDA** | I/O/Z | High impedance | [cite_start]High impedance [cite: 203] |
+| **SCL** | I/O/Z | High impedance | [cite_start]High impedance [cite: 203] |
+[cite_start]*(Note: I = Input, O = Output, Z = High impedance)* [cite: 206]
+
+---
+
+## [cite_start]21.3.4 Data Validity [cite: 213]
+* [cite_start]**Stability:** The data on the SDA line must be stable during the high period of the clock. [cite: 215]
+* **State Changes:** The high and low states of the data line can only change when the clock signal on the SCL line is LOW. [cite: 216]
