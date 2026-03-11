@@ -263,8 +263,6 @@ The following tables detail the connectivity and resource allocation for the I2C
 * [cite_start]**Thresholds & Clearing:** * In I2C Slave TX Mode, the TX FIFO threshold should be set to 1 (`I2C_BUF.TXTRSH = 0`), since the length of the transfer may not be known at configuration time[cite: 576]. 
     * [cite_start]The I2C module offers the possibility to the user to clear the RX or TX FIFO using `I2C_BUF.RXFIFO_CLR` and `I2C_BUF.TXFIFO_CLR` registers, which act like software reset for the FIFOs[cite: 581, 582].
 
-# 21.3 Functional Description (Continued)
-
 ## 21.3.14.4 Draining Feature
 [cite_start]The Draining Feature is implemented by the I2C core for handling the end of transfers whose length is not a multiple of the FIFO threshold value, and offers the possibility to transfer the remaining amount of bytes (since the threshold is not reached)[cite: 598]. [cite_start]Note that this feature prevents the CPU or the DMA controller from attempting more FIFO accesses than necessary (for example, to generate at the end of a transfer a DMA RX request having in the FIFO fewer bytes than the configured DMA transfer length)[cite: 599]. [cite_start]Otherwise, an Access Error interrupt will be generated (see `I2C_IRQSTATUS_RAW.AERR` interrupt)[cite: 600]. 
 
@@ -310,3 +308,51 @@ The following tables detail the connectivity and resource allocation for the I2C
 [cite_start]To configure the I2C to stop during emulation suspend events (for example, debugger breakpoints), set up the I2C and the Debug Subsystem[cite: 641]:
 1. Set `I2C_SYSTEST.FREE = 0`. [cite_start]This will allow the Suspend_Control signal from the Debug Subsystem to stop and start the I2C[cite: 642]. [cite_start]Note that if `FREE = 1`, the Suspend_Control signal is ignored and the I2C is free running regardless of any debug suspend event[cite: 643]. [cite_start]This FREE bit gives local control from a module perspective to gate the suspend signal coming from the Debug Subsystem[cite: 644].
 2. [cite_start]Set the appropriate `xxx_Suspend_Control` register = `0x9` as described in Section 27.1.1.1, Debug Suspend Support for Peripherals[cite: 645]. [cite_start]Choose the register appropriate to the peripheral you want to suspend during a suspend event[cite: 646].
+
+# [cite_start]21.4 I2C Registers [cite: 653]
+
+[cite_start]**NOTE:** All bits defined as reserved must be written by software with 0s, for preserving future compatibility. [cite: 654] [cite_start]When read, any reserved bit returns 0. [cite: 655] [cite_start]Also, note that it is good software practice to use complete mask patterns for setting or testing individually bit fields within a register. [cite: 655]
+
+## [cite_start]21.4.1 I2C Registers [cite: 656, 657]
+
+[cite_start]Table 21-8 lists the memory-mapped registers for the I2C. [cite: 658] [cite_start]All register offset addresses not listed in Table 21-8 should be considered as reserved locations and the register contents should not be modified. [cite: 658]
+
+
+### Table 21-8. [cite_start]I2C Registers [cite: 659]
+
+| Offset | Acronym / Register Name | Section |
+| :--- | :--- | :--- |
+| **0h** | I2C_REVNB_LO (Module Revision Register - low bytes) | [cite_start]Section 21.4.1.1 [cite: 660] |
+| **4h** | I2C_REVNB_HI (Module Revision Register - high bytes) | [cite_start]Section 21.4.1.2 [cite: 660] |
+| **10h** | I2C_SYSC (System Configuration Register) | [cite_start]Section 21.4.1.3 [cite: 660] |
+| **24h** | I2C_IRQSTATUS_RAW (I2C Status Raw Register) | [cite_start]Section 21.4.1.4 [cite: 660] |
+| **28h** | I2C_IRQSTATUS (I2C Status Register) | [cite_start]Section 21.4.1.5 [cite: 660] |
+| **2Ch** | I2C_IRQENABLE_SET (I2C Interrupt Enable Set Register) | [cite_start]Section 21.4.1.6 [cite: 660] |
+| **30h** | I2C_IRQENABLE_CLR (I2C Interrupt Enable Clear Register) | [cite_start]Section 21.4.1.7 [cite: 660] |
+| **34h** | I2C_WE (I2C Wakeup Enable Register) | [cite_start]Section 21.4.1.8 [cite: 660] |
+| **38h** | I2C_DMARXENABLE_SET (Receive DMA Enable Set Register) | [cite_start]Section 21.4.1.9 [cite: 660] |
+| **3Ch** | I2C_DMATXENABLE_SET (Transmit DMA Enable Set Register) | [cite_start]Section 21.4.1.10 [cite: 660] |
+| **40h** | I2C_DMARXENABLE_CLR (Receive DMA Enable Clear Register) | [cite_start]Section 21.4.1.11 [cite: 660] |
+| **44h** | I2C_DMATXENABLE_CLR (Transmit DMA Enable Clear Register) | [cite_start]Section 21.4.1.12 [cite: 660] |
+| **48h** | I2C_DMARXWAKE_EN (Receive DMA Wakeup Register) | [cite_start]Section 21.4.1.13 [cite: 660] |
+| **4Ch** | I2C_DMATXWAKE_EN (Transmit DMA Wakeup Register) | [cite_start]Section 21.4.1.14 [cite: 660] |
+| **90h** | I2C_SYSS (System Status Register) | [cite_start]Section 21.4.1.15 [cite: 660] |
+| **94h** | I2C_BUF (Buffer Configuration Register) | [cite_start]Section 21.4.1.16 [cite: 660] |
+| **98h** | I2C_CNT (Data Counter Register) | [cite_start]Section 21.4.1.17 [cite: 660] |
+| **9Ch** | I2C_DATA (Data Access Register) | [cite_start]Section 21.4.1.18 [cite: 660] |
+| **A4h** | I2C_CON (I2C Configuration Register) | [cite_start]Section 21.4.1.19 [cite: 660] |
+| **A8h** | I2C_OA (I2C Own Address Register) | [cite_start]Section 21.4.1.20 [cite: 660] |
+| **ACh** | I2C_SA (I2C Slave Address Register) | [cite_start]Section 21.4.1.21 [cite: 660] |
+| **B0h** | I2C_PSC (I2C Clock Prescaler Register) | [cite_start]Section 21.4.1.22 [cite: 660] |
+| **B4h** | I2C_SCLL (I2C SCL Low Time Register) | [cite_start]Section 21.4.1.23 [cite: 660] |
+| **B8h** | I2C_SCLH (I2C SCL High Time Register) | [cite_start]Section 21.4.1.24 [cite: 660] |
+| **BCh** | I2C_SYSTEST (System Test Register) | [cite_start]Section 21.4.1.25 [cite: 660] |
+| **C0h** | I2C_BUFSTAT (I2C Buffer Status Register) | [cite_start]Section 21.4.1.26 [cite: 660] |
+| **C4h** | I2C_OA1 (I2C Own Address 1 Register) | [cite_start]Section 21.4.1.27 [cite: 660] |
+| **C8h** | I2C_OA2 (I2C Own Address 2 Register) | [cite_start]Section 21.4.1.28 [cite: 660] |
+| **CCh** | I2C_OA3 (I2C Own Address 3 Register) | [cite_start]Section 21.4.1.29 [cite: 660] |
+| **D0h** | I2C_ACTOA (Active Own Address Register) | [cite_start]Section 21.4.1.30 [cite: 660] |
+| **D4h** | I2C_SBLOCK (I2C Clock Blocking Enable Register) | [cite_start]Section 21.4.1.31 [cite: 660] |
+
+---
+[cite_start]*Source: SPRUH73Q—October 2011—Revised December 2019, Texas Instruments Incorporated.* [cite: 661, 662]
