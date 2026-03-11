@@ -426,3 +426,295 @@ The gray-scaler/serializer is bypassed[cite: 839].
 | **12** | 3375 possible colors / X | 4096 possible colors |
 | **16** | 3375 possible colors (`STN_565 = 1`) / X | Up to 65536 possible colors |
 | **24** | X / X | Up to 16.7 million colors |
+
+#### 13.3.6.5 Output Format
+
+##### 13.3.6.5.1 Passive (STN) Mode
+[cite_start]As shown in Figure 13-12, the pixel data stored in frame buffers go through palette (if applicable) and gray-scaler/serializer before reaching the Output FIFO[cite: 859]. [cite_start]As a result, it is likely that the data fed to the Output FIFO is numerically different from the data in the frame buffers[cite: 860]. (However, they represent the same color or grayscale.) [cite_start][cite: 861]
+
+[cite_start]The output FIFO formats the received data according to display modes (see Table 13-7)[cite: 862]. [cite_start]Figure 13-22 shows the actual data output on the external pins[cite: 863].
+
+##### 13.3.6.5.2 Active (TFT) Mode
+[cite_start]As shown in Figure 13-12, the gray-scaler/serializer and output FIFO are bypassed in active (TFT) mode[cite: 865]. [cite_start]Namely, at each pixel clock, one pixel data (16 bits) is output to the external LCD[cite: 866].
+
+[Figure: Figure 13-22. Monochrome and Color Output. [cite_start]Shows how Pixel clock synchronizes with LCD controller output pins for Monochrome (MONO8B-0, MONO8B-1 with Pixel data [3:0] and [7:0]) and Color (Pixel data [7:0] mapping Red, Green, and Blue pixels to pins 0-7)] [cite: 870-940].
+
+---
+
+#### 13.3.6.6 Subpicture Feature
+
+[cite_start]A feature exists in the LCD to cover either the top or lower portion of the display with a default color[cite: 950]. [cite_start]This feature is called a subpicture and is illustrated in Figure 13-23[cite: 951]. [cite_start]Subpictures are only allowed for Active Matrix mode (`cfg_lcdtft = '1'`)[cite: 952].
+
+[cite_start]Subpictures reduce the bandwith to the DDR since lines containing default pixel data are not read from memory[cite: 953]. [cite_start]For example, suppose the panel has 100 lines of which 50 are default pixel data lines[cite: 954]. [cite_start]Then, only 50 lines of data are DMAed from DDR for this subpicture setup[cite: 955]. [cite_start]That is, the `cfg_fbx_base` and `cfg_fbx_ceiling` registers only encompass 50 lines of data instead of 100[cite: 956].
+
+[Figure: Figure 13-23. Example of Subpicture. [cite_start]Shows a news broadcast image with the bottom half covered by a solid teal block, representing the default color area.] [cite: 957-958].
+
+[cite_start]The subpicture feature is enabled when the `spen` MMR control bit is set to '1'[cite: 959]. 
+* [cite_start]The `hols` bit, when set to '0,' puts the Default Pixel Data lines at the top of the screen and the active video lines at the bottom of the screen[cite: 960]. 
+* [cite_start]When the `hols` bit is set to '1,' Active video lines are at the top of the screen and Default Pixel Data lines are at the bottom of the screen[cite: 961]. 
+
+[cite_start]The `hols` bit behavior is shown in Figure 13-24[cite: 962].
+
+[Figure: Figure 13-24. Subpicture HOLS Bit. Illustrates the screen split with "hols = '1'" (video top, solid bottom) and "hols = '0'" (solid top, video bottom). [cite_start]Also indicates the 'lppt' dimension.] [cite: 963-968].
+
+[cite_start]The lines per panel threshold (LPPT) bitfield defines the number of lines at the bottom of the picture for both `hols = '1'` or `'0'`[cite: 969]. [cite_start]LPPT is an encoded value in the range `{0:2047}` used to represent the number of lines in the range `{1:2048}`[cite: 970].
+
+---
+
+[Figure: Figure 13-25. Raster Mode Display Format. [cite_start]A grid showing "Data lines (from 1 to L)" on the Y-axis and "Data pixels (from 1 to P)" on the X-axis, mapping coordinates like (1,1), (2,1), down to (P, L) onto the LCD area.] [cite: 983-998].
+
+#### 13.3.6.7 Raster Controller Timing
+
+[Figure: Figure 13-26. Raster Mode Passive (STN) Timing Diagram. Shows waveform timings for LCD_HSYNC, LCD_VSYNC, LCD_DATA[15:0], LCD_AC_BIAS_EN, and LCD_PCLK. [cite_start]Highlights parameters like VBP, VFP, VSW, Line time, Lines per panel (LPP), AC bias frequency (ACB), Pixels per line (PPL), Horizontal front porch (HFP), Horizontal sync pulse width (HSW), and Horizontal back porch (HBP).] [cite: 1006-1059].
+
+[Figure: Figure 13-27. Raster Mode Active (TFT) Timing Diagram. Shows waveform timings for LCD_HSYNC, LCD_VSYNC, LCD_DATA[15:0], LCD_AC_BIAS_EN, and LCD_PCLK. [cite_start]Highlights parameters like Vertical sync pulse width (VSW), Vertical back porch (VBP), Lines per panel (LPP), Vertical front porch (VFP), Line time, AC bias frequency (ACB), Pixels per line (PPL), Horizontal front porch (HFP), Horizontal sync pulse width (HSW), and Horizontal back porch (HBP).] [cite: 1069-1109].
+### 13.3.7 Interrupt Conditions
+
+#### 13.3.7.1 Highlander 0.8 Interrupts
+
+##### 13.3.7.1.1 Highlander Interrupt Basics
+[cite_start]The interrupt mechanism is Highlander 0.8-compliant and relies on the `ipgvmodirq` IP Generic[cite: 1120]. [cite_start]The `ipgvmodirq` module supports hardware-initiated interrupts, each of which can also be individually triggered by software[cite: 1121]. [cite_start]An interrupt mask function allows each interrupt to be masked or enabled[cite: 1122]. [cite_start]The software can read all of the raw interrupts or only those that are unmasked[cite: 1123]. [cite_start]All pending interrupts in the LCD module must be serviced by the Host's Interrupt Service Routine before it exits[cite: 1124]. [cite_start]The Interrupt Module registers are described in the following table[cite: 1125].
+
+**Table 13-12. Highlander 0.8 Interrupt Module Control Registers**
+
+| Address Offset | Name | Description |
+| :--- | :--- | :--- |
+| `0x58` | `Reg22` | Interrupt Raw Status Register |
+| `0x5C` | `Reg23` | Interrupt Masked Status Register |
+| `0x60` | `Reg24` | Interrupt Enable Set (Unmask) |
+| `0x64` | `Reg25` | Interrupt Enable Clear (Mask) |
+| `0x68` | `Reg26` | End of Interrupt Indicator |
+
+##### 13.3.7.1.2 Raw Status Register
+[cite_start]Interrupts are associated with a bit position[cite: 1129]. [cite_start]For instance, Hardware Interrupt 0 is physically connected to bit 0 of the interrupt controller and all Sets, Clears, and Masks to this interrupt will reference the Bit 0 location of the interrupt vector[cite: 1129]. [cite_start]Likewise, Hardware Interrupt 1 is referenced by bit 1 of the interrupt vector, and so on[cite: 1130].
+
+[cite_start]The Host CPU can see all the interrupts that have been set, regardless of the interrupt mask, by reading `Reg22`, the Raw Status Register[cite: 1131]. [cite_start]If the Host CPU writes a '1' to a bit position in Reg 22, it will do a software set for the interrupt associated with that bit position[cite: 1132].
+
+##### 13.3.7.1.3 Masked Status Register
+[cite_start]The Masked Status Register contains all the pending interrupts that are unmasked (enabled)[cite: 1134]. [cite_start]The Interrupt Service Routine should read this register to determine which interrupts must be serviced[cite: 1135].
+
+##### 13.3.7.1.4 Interrupt Enable Set Register
+[cite_start]To unmask an interrupt, the Host CPU writes a '1' to the appropriate bit position of the Enable Set (Unmask) register[cite: 1137].
+
+##### 13.3.7.1.5 Interrupt Enable Clear Register
+[cite_start]To mask an interrupt, the Host CPU writes a '1' to the appropriate bit position of the Enable Clear (Mask) register[cite: 1139].
+
+##### 13.3.7.1.6 End of Interrupt Register
+[cite_start]The `ipgvmodirq` module supports level or pulse interrupts to the CPU[cite: 1141]. [cite_start]For pulse interrupts, the Host must write to an end-of-interrupt (EOI), memory-mapped address to indicate that the Interrupt Service Routine has completed and is exiting[cite: 1142]. [cite_start]Any pending interrupts that have not been serviced will trigger another interrupt pulse to the Host CPU[cite: 1143].
+
+---
+
+#### 13.3.7.2 Interrupt Sources
+
+##### 13.3.7.2.1 Overview of Interrupt Sources
+The interrupt sources include:
+* [cite_start]DMA End of Frame 0 [cite: 1152]
+* [cite_start]DMA End of Frame 1 [cite: 1153]
+* [cite_start]Palette Loaded [cite: 1154]
+* [cite_start]FIFO Underflow [cite: 1155]
+* [cite_start]AC Bias Count [cite: 1156]
+* [cite_start]Sync Lost [cite: 1157]
+* [cite_start]Recurrent Frame Done [cite: 1158]
+* [cite_start]LIDD or Raster Frame Done [cite: 1159]
+
+###### 13.3.7.2.1.1 DMA End of Frame 0 and End of Frame 1 Interrupt
+[cite_start]The DMA End of Frame 0 and End of Frame 1 interrupts are triggered when the DMA module has completed transferring the contents of a frame buffer bounded by `cfg_fb0_base`/`cfg_bf0_ceil` or `cfg_fb1_base`/`cfg_fb1_ceil`[cite: 1162].
+
+###### 13.3.7.2.1.2 Palette Loaded Interrupt
+[cite_start]When `cfg_palmode` is set to Palette-only or Palette+data, the Palette Loaded interrupt is triggered when the palette portion of the DMA transfer has been stored in the Palette RAM[cite: 1164].
+
+###### 13.3.7.2.1.3 FIFO Underflow Interrupt
+[cite_start]The FIFO Underflow interrupt is triggered when the real-time output needs to send a value for pixel data but one cannot be found in the FIFO[cite: 1166].
+
+###### 13.3.7.2.1.4 AC Bias Count Interrupt
+[cite_start]For Passive Matrix displays, a count can be kept of the number of times the AC Bias line toggles[cite: 1168]. [cite_start]Once the specified number of transitions has been seen, the AC Bias Count interrupt is triggered[cite: 1169]. [cite_start]The module will not post any further interrupts or keep counting AC Bias transitions until the interrupt has been cleared[cite: 1170].
+
+###### 13.3.7.2.1.5 Sync Lost Interrupt
+[cite_start]When the DMA module reads a frame buffer and stores it in the FIFO, it sets a start frame and an end frame indicator embedded with the data[cite: 1172]. [cite_start]On retrieving the data from the FIFO in the `lcd_clk` domain, the Sync Lost interrupt is triggered if the start indicator is not found at the first pixel of a new frame[cite: 1173].
+
+###### 13.3.7.2.1.6 Recurrent Frame Done Interrupt
+[cite_start]In raster mode, the Recurrent Frame Done interrupt is triggered each time a complete frame has been sent to the interface pins[cite: 1175].
+
+###### 13.3.7.2.1.7 LIDD or Raster Frame Done Interrupt
+[cite_start]In LIDD DMA mode, a frame buffer of data is sent[cite: 1177]. [cite_start]When the frame buffer has completed, the LIDD Frame Done interrupt is triggered[cite: 1178]. [cite_start]In order to do another LIDD DMA, the DMA engine must be disabled and then re-enabled[cite: 1179]. [cite_start]In Raster mode, the interrupt is triggered after `cfg_lcden` is set to '0' and after the last frame is sent to the pins[cite: 1180]. [cite_start]After the Raster mode DMA is running, the interrupt occurs only once after the module is disabled[cite: 1181].
+
+---
+
+### 13.3.8 DMA
+
+[cite_start]DDR access is handled internally by the DMA module[cite: 1189]. [cite_start]For Character Displays, the DMA module can transfer a sequence of data transactions from the DDR to LCD panel[cite: 1189]. [cite_start]By using the DMA instead of the Host CPU, the Host will not be stalled waiting for the slow external peripheral to complete[cite: 1190]. [cite_start]For Passive and Active Matrix displays, the DMA is used to read frame buffers with associated palette information from DDR[cite: 1191]. [cite_start]The DMA parses the frame buffer according to the frame buffer type and supplies the raster processing chain with Palette information and pixel data as needed[cite: 1192].
+
+---
+
+### 13.3.9 Power Management
+
+Power management within the DSS can be accomplished in several ways:
+1. [cite_start]L4 OCP MConnect/SConnect can disable the internal L4 clock network[cite: 1194].
+2. [cite_start]L3 OCP MConnect/Sconnect can disable the internal L3 clock network[cite: 1195].
+3. [cite_start]Within the Clock Control register, there are clock enable registers to disable the clock networks to all major internal functional paths[cite: 1196].
+4. [cite_start]Power Compiler clock gates are automatically instantiated within datapaths to minimize active power[cite: 1197].
+
+[cite_start]Items 1 and 2 are accomplished using the standard IDLE (for L4) and STANDBY (for L3) IPGeneric modules[cite: 1198]. [cite_start]When these modules are instructed to disable clocks for the internal L3 or L4 (MMR) clock domains, the internal clock networks will be shut down[cite: 1199]. [cite_start]This shutdown applies to the external clock pins `l3_clk` and `l4_clk`[cite: 1200].
+
+[cite_start]All other internal clock domains (Item 3) can only be shut down by writing the appropriate register bit within the Clock Enable register[cite: 1201]. [cite_start]This software clock control applies to all other clock inputs[cite: 1202].
+
+[cite_start]Power Compiler clock gating is done automatically as a function of the design[cite: 1203]. [cite_start]There is no special control required for this operation[cite: 1204].
+
+[cite_start]Because the LCD normally drives displays, and because all video is sourced from the L3 clock domain, shutting down the L3 domain using the IPGenerics can cause undesirable display effects[cite: 1205]. [cite_start]In most circumstances, it will be necessary to hardware/software reset the LCD module after such an event has occurred[cite: 1206].
+
+## 13.4 Programming Model
+
+### 13.4.1 LCD Character Displays
+
+#### 13.4.1.1 Configuration Registers, Setup, and Settings
+
+##### 13.4.1.1.1 Configuration Registers
+Set the following to appropriate values for the target LCD character panel:
+* [cite_start]`cfg_cs1_e1_pol` [cite: 1219]
+* [cite_start]`cfg_cs0_e0_pol` [cite: 1220]
+* [cite_start]`ws_dir_pol` [cite: 1221]
+* [cite_start]`cfg_rs_en_pol` [cite: 1222]
+* [cite_start]`cfg_alepol` [cite: 1223]
+
+[cite_start]`cfg_lidd_mode_sel[2:0]` defines the type of CPU bus that will be used in interfacing with the LCD character panel[cite: 1225]. [cite_start]Note that the clocked bus styles only support a single panel using CS0 since the clock pin takes a device pin that is otherwise used for CS1[cite: 1226, 1227].
+
+Set the following to appropriate bus timing parameters for the target LCD character panel:
+* [cite_start]`cfg_w_su` [cite: 1228]
+* [cite_start]`cfg_w_strobe` [cite: 1229]
+* [cite_start]`cfg_w_hold` [cite: 1230]
+* [cite_start]`cfg_r_su` [cite: 1230]
+* [cite_start]`cfg_r_strobe` [cite: 1231]
+* [cite_start]`cfg_r_hold` [cite: 1232]
+* [cite_start]`cfg_ta` [cite: 1233]
+
+[cite_start]A set of bus timing parameters are individually available for CS0 and CS1 such that the bus transactions can be customized for each of the two supported LCD character displays[cite: 1234].
+
+##### 13.4.1.1.2 Defining Panel Commands and Panel Data
+[cite_start]In the Hitachi interface mode used for the example panel, whether the Character Panel understands a data transfer as Command or Data depends on the state of the REGSEL input pin[cite: 1236]. 
+* [cite_start]Writing to the `cfg_adr_indx` register will output a Command transfer[cite: 1237]. 
+* [cite_start]Writing to the `cfg_data` register will result in a Data transfer[cite: 1238]. 
+
+[cite_start]Functionally, the ALE (`lcd_fp` pin) from the LCD controller is tied to the REGSEL input of the character panel[cite: 1239]. For example, to send byte 0xAB as a command to the previously described character panel, the CPU would write 0x00AB to the `adr_indx` register[cite: 1240]. [cite_start]To send byte 0xAB as data, the CPU would write 0x00AB to the `data` register[cite: 1241].
+
+#### 13.4.1.2 CPU Initiated Data Bus Transactions
+
+##### 13.4.1.2.1 Initiating Data Bus Transactions
+* [cite_start]Writing to `cfg_cs0_data` will initiate a write transfer to the CS0 panel[cite: 1250]. 
+* [cite_start]Reading from `cfg_cs0_data` will initiate a read transfer from the CS0 panel[cite: 1251].
+* [cite_start]Writing to `cfg_cs1_data` will initiate a write transfer to the CS1 panel[cite: 1252]. 
+* [cite_start]Reading from `cfg_cs1_data` will initiate a read transfer from the CS0 panel[cite: 1253].
+
+[cite_start]**NOTE:** Writes to CS1 translate to valid bus transactions only if `cfg_lidd_mode_sel[2:0]` is configured for an asynchronous mode[cite: 1254].
+
+#### 13.4.1.3 DMA Initiated Data Bus Transactions for LIDD
+
+##### 13.4.1.3.1 DMA Overview for MPU Bus Output
+[cite_start]Writing a long sequence of data to the Character Display Panel will ensure that the CPU will be occupied for a long time[cite: 1257]. [cite_start]However, the DMA module supports a mode in which this sequence of data elements can first be written in DRAM by the CPU[cite: 1258]. [cite_start]The DMA can read this sequence of commands or data from the DRAM and send it to the LCD Interface Display Driver (LIDD) module such that each data element becomes a write bus transaction to the external Character Panel/MPU Bus[cite: 1259]. [cite_start]The data bus write transaction can target either CS0 or CS1 and use the appropriate bus timing parameters[cite: 1260].
+
+[cite_start]Functionally, in this DMA LIDD mode, the DMA module sends the sequence of data to the LIDD module by acting as another CPU[cite: 1261]. [cite_start]The DMA can only perform write bus transactions[cite: 1262]. [cite_start]It cannot read from the external character panel a series of data elements and store them in the DRAM[cite: 1262].
+
+[cite_start]When the LIDD module is controlled by the DMA module by setting `cfg_lidd_dma_en = '1'`, CPU reads or writes to `cfg_adr_index` and `cfg_data` are not allowed[cite: 1263]. [cite_start]The `fb0_base` and `fb0_ceil` registers define the address boundary of data elements to be sent out the character display by the DMA engine[cite: 1264]. [cite_start]Setting `cfg_lidd_dma_en` from '0' to '1' will initiate the DMA as if a virtual CPU is reading data from the DDR and writing the values to Reg6 or Reg9[cite: 1265]. [cite_start]`cfg_dma_cs0_cs1` determines whether the virtual CPU writes to Reg6 (CS0) or Reg7 (CS1)[cite: 1265].
+
+[cite_start]**NOTE:** Writes to CS1 translate to valid bus transactions only if `cfg_lidd_mode_sel[2:0]` is configured for an asynchronous mode[cite: 1266].
+
+[cite_start]The DMA module requires the start and end DDR addresses to be on word-aligned byte addresses[cite: 1267]. [cite_start]The MPU/LIDD bus is a halfword (16 bit) output, so both the upper and lower halfwords of the DDR memory will be sent out[cite: 1268]. [cite_start]Thus, the number of data elements sent to the LIDD by the DMA must always result in an even number of bus MPU bus transactions[cite: 1269]. [cite_start]In other words, a transfer of three 32-bit words from DDR will result in six 16-bit bus transactions[cite: 1270].
+
+##### 13.4.1.3.2 MCU/LIDD DMA Setup: Example Pseudo Code
+[cite_start]Suppose we want to send by DMA a section of DDR memory from byte address 0x4 to byte address 0x3C to the MCU bus using chip select 0. The pseudo code for such an operation is listed below[cite: 1278].
+
+## 13.4 Programming Model
+
+### 13.4.1 LCD Character Displays
+
+#### 13.4.1.1 Configuration Registers, Setup, and Settings
+
+##### 13.4.1.1.1 Configuration Registers
+Set the following to appropriate values for the target LCD character panel:
+* [cite_start]`cfg_cs1_e1_pol` [cite: 1219]
+* [cite_start]`cfg_cs0_e0_pol` [cite: 1220]
+* [cite_start]`ws_dir_pol` [cite: 1221]
+* [cite_start]`cfg_rs_en_pol` [cite: 1222]
+* [cite_start]`cfg_alepol` [cite: 1223]
+
+[cite_start]`cfg_lidd_mode_sel[2:0]` defines the type of CPU bus that will be used in interfacing with the LCD character panel[cite: 1225]. [cite_start]Note that the clocked bus styles only support a single panel using CS0 since the clock pin takes a device pin that is otherwise used for CS1[cite: 1226, 1227].
+
+Set the following to appropriate bus timing parameters for the target LCD character panel:
+* [cite_start]`cfg_w_su` [cite: 1228]
+* [cite_start]`cfg_w_strobe` [cite: 1229]
+* [cite_start]`cfg_w_hold` [cite: 1230]
+* [cite_start]`cfg_r_su` [cite: 1230]
+* [cite_start]`cfg_r_strobe` [cite: 1231]
+* [cite_start]`cfg_r_hold` [cite: 1232]
+* [cite_start]`cfg_ta` [cite: 1233]
+
+[cite_start]A set of bus timing parameters are individually available for CS0 and CS1 such that the bus transactions can be customized for each of the two supported LCD character displays[cite: 1234].
+
+##### 13.4.1.1.2 Defining Panel Commands and Panel Data
+[cite_start]In the Hitachi interface mode used for the example panel, whether the Character Panel understands a data transfer as Command or Data depends on the state of the REGSEL input pin[cite: 1236]. 
+* [cite_start]Writing to the `cfg_adr_indx` register will output a Command transfer[cite: 1237]. 
+* [cite_start]Writing to the `cfg_data` register will result in a Data transfer[cite: 1238]. 
+
+[cite_start]Functionally, the ALE (`lcd_fp` pin) from the LCD controller is tied to the REGSEL input of the character panel[cite: 1239]. For example, to send byte 0xAB as a command to the previously described character panel, the CPU would write 0x00AB to the `adr_indx` register[cite: 1240]. [cite_start]To send byte 0xAB as data, the CPU would write 0x00AB to the `data` register[cite: 1241].
+
+#### 13.4.1.2 CPU Initiated Data Bus Transactions
+
+##### 13.4.1.2.1 Initiating Data Bus Transactions
+* [cite_start]Writing to `cfg_cs0_data` will initiate a write transfer to the CS0 panel[cite: 1250]. 
+* [cite_start]Reading from `cfg_cs0_data` will initiate a read transfer from the CS0 panel[cite: 1251].
+* [cite_start]Writing to `cfg_cs1_data` will initiate a write transfer to the CS1 panel[cite: 1252]. 
+* [cite_start]Reading from `cfg_cs1_data` will initiate a read transfer from the CS0 panel[cite: 1253].
+
+[cite_start]**NOTE:** Writes to CS1 translate to valid bus transactions only if `cfg_lidd_mode_sel[2:0]` is configured for an asynchronous mode[cite: 1254].
+
+#### 13.4.1.3 DMA Initiated Data Bus Transactions for LIDD
+
+##### 13.4.1.3.1 DMA Overview for MPU Bus Output
+[cite_start]Writing a long sequence of data to the Character Display Panel will ensure that the CPU will be occupied for a long time[cite: 1257]. [cite_start]However, the DMA module supports a mode in which this sequence of data elements can first be written in DRAM by the CPU[cite: 1258]. [cite_start]The DMA can read this sequence of commands or data from the DRAM and send it to the LCD Interface Display Driver (LIDD) module such that each data element becomes a write bus transaction to the external Character Panel/MPU Bus[cite: 1259]. [cite_start]The data bus write transaction can target either CS0 or CS1 and use the appropriate bus timing parameters[cite: 1260].
+
+[cite_start]Functionally, in this DMA LIDD mode, the DMA module sends the sequence of data to the LIDD module by acting as another CPU[cite: 1261]. [cite_start]The DMA can only perform write bus transactions[cite: 1262]. [cite_start]It cannot read from the external character panel a series of data elements and store them in the DRAM[cite: 1262].
+
+[cite_start]When the LIDD module is controlled by the DMA module by setting `cfg_lidd_dma_en = '1'`, CPU reads or writes to `cfg_adr_index` and `cfg_data` are not allowed[cite: 1263]. [cite_start]The `fb0_base` and `fb0_ceil` registers define the address boundary of data elements to be sent out the character display by the DMA engine[cite: 1264]. [cite_start]Setting `cfg_lidd_dma_en` from '0' to '1' will initiate the DMA as if a virtual CPU is reading data from the DDR and writing the values to Reg6 or Reg9[cite: 1265]. [cite_start]`cfg_dma_cs0_cs1` determines whether the virtual CPU writes to Reg6 (CS0) or Reg7 (CS1)[cite: 1265].
+
+[cite_start]**NOTE:** Writes to CS1 translate to valid bus transactions only if `cfg_lidd_mode_sel[2:0]` is configured for an asynchronous mode[cite: 1266].
+
+[cite_start]The DMA module requires the start and end DDR addresses to be on word-aligned byte addresses[cite: 1267]. [cite_start]The MPU/LIDD bus is a halfword (16 bit) output, so both the upper and lower halfwords of the DDR memory will be sent out[cite: 1268]. [cite_start]Thus, the number of data elements sent to the LIDD by the DMA must always result in an even number of bus MPU bus transactions[cite: 1269]. [cite_start]In other words, a transfer of three 32-bit words from DDR will result in six 16-bit bus transactions[cite: 1270].
+
+##### 13.4.1.3.2 MCU/LIDD DMA Setup: Example Pseudo Code
+[cite_start]Suppose we want to send by DMA a section of DDR memory from byte address 0x4 to byte address 0x3C to the MCU bus using chip select 0. The pseudo code for such an operation is listed below[cite: 1278].
+// Enable Clocks
+wr 0060_0000 0007
+
+// LCD Control Register
+wr 0004_0000 8000 // set clock divisor
+
+// LIDD Control Register
+wr 0000_0000 000C // set output bus polarities and lidd_mode_sel
+
+// LIDD CS0 Register
+wr 0010_0822 1044 // set bus timing parameters for CS0
+
+// DMA Control Register
+wr 0040_0000 0030 // set DMA parameters like burst size, memory layout
+
+// DMA FB0 Base Register
+wr 0044_0000 0004 // DMA start byte address
+
+// DMA FB0 Ceiling Register
+wr 0048_0000 003C // DMA end byte address
+
+// LIDD Control Register enable DMA
+wr 0000_0000 010C // Flip LIDD DMA enable bit
+
+[cite: 1279-1296]
+
+Once the DMA completes sending data to the Async FIFO, the Eof0 interrupt will occur[cite: 1297]. The Done interrupt will occur when the last word is written out the MPU bus[cite: 1298]. The CPU must bring `cfg_lidd_dma_en` low before the CPU can directly initiate MPU bus transactions or for the DMA module to start again[cite: 1299].
+
+#### 13.4.1.4 Passive Matrix
+
+##### 13.4.1.4.1 Monochrome Bitrate Awareness
+In a mostly testbench related note, care must be taken when configuring the module for Passive Matrix (`cfg.lcdtft='0'`) monochrome (`cfg.lcdbw='1'`) modes[cite: 1302]. In passive matrix mode, the Blue component of the Grayscaler output is used as the quantized value for each scan order pixel[cite: 1303]. 
+
+* When `cfg_mono8b='1'`, eight pixel values must be sent through the grayscaler before one 8-bit output is ready[cite: 1304]. This output data represents the passive matrix output states for eight pixels[cite: 1305]. 
+* Likewise, when `cfg_mono8b='0'`, four pixel values must be sent through the grayscaler before one 4-bit output is ready[cite: 1306]. This output data represents the passive matrix output states for four pixels[cite: 1307].
+
+The problem arises when the output clock is fast (`cfg_clkdiv=0x2`)[cite: 1308]
