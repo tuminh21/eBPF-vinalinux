@@ -718,3 +718,121 @@ In a mostly testbench related note, care must be taken when configuring the modu
 * Likewise, when `cfg_mono8b='0'`, four pixel values must be sent through the grayscaler before one 4-bit output is ready[cite: 1306]. This output data represents the passive matrix output states for four pixels[cite: 1307].
 
 The problem arises when the output clock is fast (`cfg_clkdiv=0x2`)[cite: 1308]
+
+### [cite_start]13.4.2 Active Matrix Displays [cite: 1319]
+
+#### [cite_start]13.4.2.1 Interfacing to Dual LVDS Transmitters [cite: 1320]
+[cite_start]The pixel clock rate for HD-sized pictures is approximately 148.5 MHz. [cite: 1322] [cite_start]At this speed, the LVDS link requires a double-wide data bus for transferring the even and odd pixels at half the pixel rate. [cite: 1323] [cite_start]The LCD Controller outputs one pixel per pixel clock cycle. [cite: 1324] [cite_start]Some LVDS transmitters accept a high speed, single pixel input and output to dual LVDS drivers, in which case external glue logic is unnecessary. [cite: 1325] [cite_start]For those LVDS transmitters that require the even and odd pixel to enter the LVDS transmitter at half the pixel clock rate, external logic is required. [cite: 1326]
+
+---
+
+### [cite_start]13.4.3 System Interaction [cite: 1327]
+
+#### [cite_start]13.4.3.1 DMA End of Frame Interrupts [cite: 1328]
+[cite_start]The LCD module works with the DMA such that data is fetched from DDR and sent to a FIFO memory. [cite: 1329] [cite_start]The DMA module does this fetching independently of the logic on the output side of the FIFO. [cite: 1330]
+
+* [cite_start]**LIDD Mode DMA:** For LIDD mode DMA, the module fetches frame buffer 0. [cite: 1331] [cite_start]When the last word of frame buffer 0 is stored in the FIFO memory, the Eof0 interrupt is triggered (if `cfg_eof_inten="1"`) and the DMA stops. [cite: 1331] [cite_start]The CPU has to set `cfg_lidd_dma_en` to `'0'`, followed by a `cfg_lidd_dma_en='1'`, before the next burst from frame buffer 0 is read from DDR. [cite: 1332]
+* [cite_start]**Raster Mode DMA:** For Raster mode DMA, the module fetches frame buffer 0. [cite: 1333] [cite_start]When the last word of frame buffer 0 is stored in the FIFO memory, the Eof0 interrupt is triggered (if `cfg_eof_inten="1"`) but the DMA does not stop. [cite: 1333] [cite_start]The DMA module ping pongs immediately to frame buffer 1 if `cfg_frame_mode='1'`. [cite: 1334] [cite_start]Otherwise, the DMA fetches the frame buffer 0 address range from DDR. [cite: 1335] [cite_start]When the DMA module fetches frame buffer 1, and the last word of frame buffer 1 is stored in the FIFO memory, the Eof1 interrupt is triggered (if `cfg_eof_inten='1'`). [cite: 1336] [cite_start]This pattern would repeat. [cite: 1337]
+
+---
+
+### [cite_start]13.4.4 Palette Lookup [cite: 1338]
+[cite_start]For Active Matrix and Passive Matrix modes, the 12-bit Palette RAM Lookup can be used. [cite: 1339]
+
+* [cite_start]**Active Matrix (`cfg.lcdtft='1'`):** Palette lookup is enabled when `cfg.tft24='0'` and the bpp field in the Palette RAM is set to "000," "001," "010," or "011" (1, 2, 4, or 8 bpp). [cite: 1340] [cite_start]Palette lookup cannot be used when the bpp field is set to "100" (12/16 bpp). [cite: 1341]
+* [cite_start]**Passive Matrix (`cfg_lcdtft='0'`):** Palette lookup is enabled when the bpp field in the Palette RAM is set to "000," "001," "010," or "011" (1, 2, 4, or 8 bpp). [cite: 1342] [cite_start]Palette lookup cannot be used when the bpp field is set to "100" (12/16 bpp). [cite: 1343]
+
+[Figure: Figure 13-28. Palette Lookup Examples. [cite_start]Illustrates the memory organization for 1 BPP, 2 BPP, 4 BPP, and 8 BPP mapping to the 256 entries in the 12-bit Palette RAM.] [cite: 1361-1382]
+
+* **1 BPP:** When the bpp encoding is set to 1 bpp, each bit in a 16-bit frame buffer halfword is used to index the two bottom locations of the palette RAM. [cite: 1345] Suppose the frame buffer bit value is '0', this '0' indicates that the address 0 entry in the Palette RAM should be read. [cite: 1346] If the frame buffer bit value is '1,' the address 1 entry in the Palette RAM is used. [cite: 1347] The resulting 12-bit output from the Palette RAM is the quantized pixel value of a 4-bit per color component quantized pixel value. [cite: 1348]
+* [cite_start]**2 BPP:** When the bpp encoding is set to 2 bpp, every two bits in a 16 bit frame buffer halfword is used to index the bottom 4 locations of the palette RAM. [cite: 1349] Suppose the frame buffer bit value is "00." [cite_start]This "00" indicates that the address 0 entry in the Palette RAM should be read. [cite: 1350] [cite_start]If the frame buffer bit value is "01," the address 1 entry in the Palette RAM is used. [cite: 1351] [cite_start]When the frame buffer bit value is "10," the address 2 entry in the Palette RAM is read. [cite: 1352] [cite_start]Finally, if the frame buffer bit value is "11," the address 3 entry in the Palette RAM is read. [cite: 1353] [cite_start]The resulting 12 bit output from the Palette RAM is the quantized pixel value of the 4 bit per color component. [cite: 1354]
+* **4 BPP:** The 4 bpp encoding allows every four bits from a frame buffer halfword to address 16 entries in the Palette RAM. [cite: 1355]
+* [cite_start]**8 BPP:** The 8 bpp encoding enables every byte from a frame buffer halfword to address one of the 256 entries in the Palette RAM. [cite: 1356]
+
+#### Frame Buffer Read Ordering
+[cite_start]A 16-bit halfword is read from the DDR frame buffer. [cite: 1385] [cite_start]This halfword can be byte lane and halfword swapped using the DMA configuration values `cfg_byte_swap` and `cfg_bigendian`. [cite: 1386] [cite_start]This section will deal with the frame buffer data as it is returned post swapped from the DMA module. [cite: 1387]
+
+[cite_start]The DMA module actually outputs a 32-bit word. [cite: 1388] [cite_start]The Palette Lookup logic uses the lower halfword first, followed by the upper halfword. [cite: 1388] [cite_start]The `cfg_rdorder` and `cfg_nibmode` registers determine the raster read ordering of the frame buffer data to be sent to the palette lookup table. [cite: 1389] 
+
+[cite_start]There are precedence rules for the hardware as it parses each 16-bit word from the frame buffer: [cite: 1390]
+1.  [cite_start]If `cfg_rdorder = '0'`, the data halfword is parsed from the least significant bit to the most significant bit. [cite: 1391]
+2.  [cite_start]Else, if `cfg_nibmode = '1'`, the data halfword is parsed byte swapped with the scan order going from the most significant bit of each byte to the least significant bit of each byte. [cite: 1392]
+3.  [cite_start]Otherwise, the data halfword is parsed from the most significant bit to the least significant bit. [cite: 1393]
+
+[cite_start]The bitwise scan order for each halfword fetched from the frame buffer is shown below. [cite: 1394] [cite_start]The bitfields returned are used to determine the addressing of the Palette RAM. [cite: 1395]
+
+[cite_start]**Frame buffer halfword scan order for 1 bpp** [cite: 1402]
+1. [cite_start]If `cfg_rdorder = 0`, scan order is `[0] [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12] [13] [14] [15]` [cite: 1404]
+2. [cite_start]Else if `cfg_nibmode = 1`, scan order is `[7] [6] [5] [4] [3] [2] [1] [0] [15] [14] [13] [12] [11] [10] [9] [8]` [cite: 1405]
+3. [cite_start]Otherwise, scan order is `[15] [14] [13] [12] [11] [10] [9] [8] [7] [6] [5] [4] [3] [2] [1] [0]` [cite: 1405]
+
+[cite_start]**Frame buffer halfword scan order for 2 bpp** [cite: 1406]
+1. [cite_start]If `cfg_rdorder = 0`, scan order is `[1:0] [3:2] [5:4] [7:6] [9:8] [11:10] [13:12] [15:14]` [cite: 1407]
+2. [cite_start]Else if `cfg_nibmode = 1`, scan order is `[7:6] [5:4] [3:2] [1:0] [15:14] [13:12] [11:10] [9:8]` [cite: 1408]
+3. [cite_start]Otherwise, scan order is `[15:14] [13:12] [11:10] [9:8] [7:6] [5:4] [3:2] [1:0]` [cite: 1409]
+
+[cite_start]**Frame buffer halfword scan order for 4 bpp** [cite: 1410]
+1. [cite_start]If `cfg_rdorder = 0`, scan order is `[3:0] [7:4] [11:8] [15:12]` [cite: 1411]
+2. [cite_start]Else if `cfg_nibmode = 1`, scan order is `[7:4] [3:0] [15:12] [11:8]` [cite: 1412]
+3. [cite_start]Otherwise, scan order is `[15:12] [11:8] [7:4] [3:0]` [cite: 1413]
+
+[cite_start]**Frame buffer halfword scan order for 8 bpp** [cite: 1414]
+1. [cite_start]If `cfg_rdorder = 0`, scan order is `[7:0] [15:8]` [cite: 1415]
+2. [cite_start]Else if `cfg_nibmode = 1`, scan order is `[7:0] [15:8]` [cite: 1416]
+3. [cite_start]Otherwise, scan order is `[15:8] [7:0]` [cite: 1417]
+
+---
+
+### [cite_start]13.4.5 Test Logic [cite: 1418]
+*(Section left intentionally blank per documentation)*
+
+---
+
+### [cite_start]13.4.6 Disable and Software Reset Sequence [cite: 1419]
+[cite_start]In Raster Modes, the module must be disabled before applying a software reset. [cite: 1420] [cite_start]When `cfg_lcden` is set to `0` to disable the module, the output continues to the end of the current frame. [cite: 1421] [cite_start]The Done interrupt will trigger once the frame is complete. [cite: 1422] [cite_start]The software reset can then be applied to the module. [cite: 1422] [cite_start]The software reset will clear all the frame information in the FIFO. [cite: 1423] [cite_start]Upon a restart, the L3 DMA will fetch from the `fb0_base` address. [cite: 1424]
+
+[cite_start]To summarize: [cite: 1425]
+1.  [cite_start]Set `cfg_lcden = '0'`. [cite: 1426]
+2.  [cite_start]Wait for the Done interrupt. [cite: 1427]
+3.  [cite_start]Set the software reset bits high (`cfg_main_rst = '1'` or [`cfg_dma_rst = '1'` and `cfg_core_rst = '1'`]) for several cycles. [cite: 1428]
+4.  [cite_start]Set the resets back low. [cite: 1429]
+5.  [cite_start]Set `cfg_lcden = '1'`. [cite: 1430]
+
+[cite_start]The disable and reset sequence must be done in this order to properly operate the LCD module and the EMIF. [cite: 1431]
+
+---
+
+### [cite_start]13.4.7 Precedence Order for Determining Frame Buffer Type [cite: 1436]
+[cite_start]The precedence order for determining frame buffer type is specified as follows: [cite: 1437]
+
+```c
+[cite_start]If (cfg_lcdtft == 1) // active matrix [cite: 1437]
+    [cite_start]If (cfg_tft24 == 1) // 24 bpp [cite: 1438]
+        [cite_start]If (cfg_tft24_unpacked == 1) [cite: 1439]
+            [cite_start]4 pixels in 4 words [cite: 1441]
+        [cite_start]else [cite: 1440]
+            [cite_start]4 pixels in 3 words [cite: 1442]
+    [cite_start]else // 1/2/4/8/12/16 bpp [cite: 1443]
+        [cite_start]if (bpp[2] == 1) [cite: 1444]
+            [cite_start]12/16 bpp data [cite: 1446]
+        [cite_start]else [cite: 1445]
+            [cite_start]if (bpp == 0) [cite: 1447, 1448]
+                [cite_start]1 bpp data [cite: 1449]
+            [cite_start]else if (bpp == 1) [cite: 1450]
+                [cite_start]2 bpp data [cite: 1451]
+            [cite_start]else if (bpp == 2) [cite: 1452]
+                [cite_start]4 bpp data [cite: 1453]
+            [cite_start]else // if (bpp == 3) [cite: 1454]
+                [cite_start]8 bpp data [cite: 1455]
+[cite_start]else // passive matrix [cite: 1456]
+    [cite_start]if (bpp[2] == 1) [cite: 1457]
+        [cite_start]12/16 bpp data [cite: 1459]
+    [cite_start]else [cite: 1458]
+        [cite_start]if (bpp == 0) [cite: 1460]
+            [cite_start]1 bpp data [cite: 1461]
+        [cite_start]else if (bpp == 1) [cite: 1462]
+            [cite_start]2 bpp data [cite: 1463]
+        [cite_start]else if (bpp == 2) [cite: 1464]
+            [cite_start]4 bpp data [cite: 1465]
+        [cite_start]else // if (bpp == 3) [cite: 1466, 1467, 1469]
+            [cite_start]8 bpp data [cite: 1468]
