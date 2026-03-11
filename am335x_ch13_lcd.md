@@ -154,3 +154,275 @@
 ## [cite_start]13.3.3 Pin Mapping and Color Assignments [cite: 190]
 
 [cite_start]Due to a silicon bug, pin mapping for the data signals for RGB888 and RGB565 are not as designed[cite: 191]. [cite_start]Refer to the AM335x Silicon Errata (SPRZ360) for proper pin mapping and color assignments when using these modes with an LCD panel[cite: 192].
+### 13.3.4 DMA Engine
+
+[cite_start]The DMA engine provides the capability to output graphics data to constantly refresh LCDs, without burdening the CPU, via interrupts or a firmware timer[cite: 200]. [cite_start]It operates on one or two frame buffers, which are set up during initialization[cite: 201]. [cite_start]Using two frame buffers (ping-pong buffers) enables the simultaneous operation of outputting the current video frame to the external display and updating the next video frame[cite: 202]. [cite_start]The ping-pong buffering approach is preferred in most applications[cite: 203].
+
+[cite_start]When the Raster Controller is used, the DMA engine reads data from a frame buffer and writes it to the input FIFO (as shown in Figure 13-1)[cite: 204]. [cite_start]The Raster Controller requests data from the FIFO for frame refresh; [cite: 205] [cite_start]as a result, the DMA's job is to ensure that the FIFO is always kept full[cite: 206].
+
+[cite_start]When the LIDD Controller is used, the DMA engine accesses the LIDD Controller's address and/or data registers[cite: 207]. [cite_start]To program the DMA engine, configure the following registers, as shown in Table 13-5[cite: 208].
+
+**Table 13-5. Register Configuration for DMA Engine Programming**
+
+| Register | Configuration |
+| :--- | :--- |
+| `LCDDMA_CTRL` | [cite_start]Configure DMA data format [cite: 210] |
+| `LCDDMA_FB0_BASE` | [cite_start]Configure frame buffer 0 [cite: 210] |
+| `LCDDMA_FB0_CEILING` | [cite_start]Configure frame buffer 0 [cite: 210] |
+| `LCDDMA_FB1_BASE` | [cite_start]Configure frame buffer 1. (If only one frame buffer is used, these two registers will not be used.) [cite: 210] |
+| `LCDDMA_FB1_CEILING` | [cite_start]Configure frame buffer 1. (If only one frame buffer is used, these two registers will not be used.) [cite: 210] |
+
+[cite_start]In addition, the `LIDD_CTRL` register (for LIDD Controller) or the `RASTER_CTRL` register (for Raster Controller) should also be configured appropriately, along with all the timing registers[cite: 211]. [cite_start]To enable DMA transfers, the `LIDD_DMA_EN` bit (in the `LIDD_CTRL` register) or the `LCDEN` bit (in the `RASTER_CTRL` register) should be written with 1[cite: 212].
+
+> [cite_start]**CAUTION:** Writes to RAM will fail when they are in the vicinity of where the DMA Engine is reading[cite: 214]. [cite_start]Thus, for screen updates to occur smoothly, rendering must be done to a buffer that is not currently in use by the DMA engine[cite: 215]. [cite_start]The between-frames period (immediately after the end-of-frame interrupts) works well to BLIT a "back buffer" (double-buffering) to the "front buffer" where DMA reads next[cite: 216]. [cite_start]This works well, and enables application firmware to let the DMA engine continue reading from the same frame buffer[cite: 217]. [cite_start]Alternatively, the location of where the DMA engine is reading from can be changed to an alternate (pre-prepared) frame buffer[cite: 218]. [cite_start]When doing so at the end-of-frame interrupt, by the time the ISR knows it is an EOF0 interrupt (for example), the DMA engine has already read its BASE and CEILING addresses for the next frame (FrameBuffer1)[cite: 219]. [cite_start]So the DMA BASE and CEILING addresses that can be changed safely at this point would be for FrameBuffer0 (the same buffer as the frame that just completed)[cite: 220]. [cite_start]Then the DMA engine starts using these addresses on the next frame[cite: 221]. [cite_start]If FrameBuffer1 BASE and CEILING are also updated, those take effect the next time the DMA engine reads them (after 2 frames)[cite: 222].
+
+---
+
+#### 13.3.4.1 Interrupts
+
+[cite_start]Interrupts in this LCD module are related to DMA engine operation[cite: 224]. [cite_start]Four registers are used to control and monitor the interrupts: [cite: 225]
+
+* [cite_start]The `IRQENABLE_SET` register allows the user to enable any of the interrupt sources[cite: 226].
+* [cite_start]The `IRQENABLE_CLEAR` register allows the user to disable interrupts sources[cite: 227].
+* [cite_start]The `IRQSTATUS_RAW` register collects all the interrupt status information[cite: 227].
+* [cite_start]The `IRQSTATUS` register collects the interrupt status information for all enabled interrupts[cite: 234].
+
+[cite_start]Any interrupt source not enabled in the `IRQENABLE_SET` register is masked out[cite: 235].
+
+##### 13.3.4.1.1 LIDD Mode
+[cite_start]When operating in LIDD mode, the DMA engine generates one interrupt signal every time the specified frame buffer has been transferred completely[cite: 237]. [cite_start]The `DONE` bit in the `LIDD_CTRL` register specifies if the interrupt signal is delivered to the system interrupt controller, which in turn may or may not generate an interrupt to CPU[cite: 238]. [cite_start]The `EOF1`, `EOF0`, and `DONE` bits in the `IRQSTATUS_RAW` register reflect the interrupt signal, regardless of being delivered to the system interrupt controller or not[cite: 239].
+
+##### 13.3.4.1.2 Raster Mode
+[cite_start]When operating in Raster mode, the DMA engine can generate the interrupts in the following scenarios: [cite: 241]
+
+1.  [cite_start]**Output FIFO under-run:** This occurs when the DMA engine cannot keep up with the data rate consumed by the LCD (which is determined by the `LCD_PCLK`.)[cite: 242, 243]. [cite_start]This is likely due to a system memory throughput issue or an incorrect `LCD_PCLK` setting[cite: 243]. The `FUF` bit in `IRQSTATUS_RAW` is set when this error occurs[cite: 244]. [cite_start]This bit is cleared by writing a 1 to the `FUF` bit in the `IRQSTATUS` register[cite: 245].
+2.  [cite_start]**Frame synchronization lost:** This error happens when the DMA engine attempts to read what it believes to be the first word of the video buffer but it cannot be recognized as such[cite: 246]. [cite_start]This could be caused by an invalid frame buffer address or an invalid BPP value (for more details, see Section 13.3.6.2)[cite: 247]. [cite_start]The `SYNC` bit in the `IRQSTATUS_RAW` register is set when such an error is detected[cite: 248]. This bit is cleared by writing a 1 to the `SYNC` bit in the `IRQSTATUS` register[cite: 249].
+3.  [cite_start]**Palette loaded:** When using palette-only or palette+data modes, the `PL` bit in the `IRQSTATUS_RAW` register will be set when the palette portion of a DMA transfer has been loaded into palette RAM[cite: 250]. This interrupt can be cleared by writing a '1' to the `PL` bit in the `IRQSTATUS` register[cite: 251].
+4.  [cite_start]**AC bias transition:** If the `ACB_I` bit in the `RASTER_TIMING_2` register is programmed with a non-zero value, an internal counter will be loaded with this value and starts to decrement each time `LCD_AC_BIAS_EN` (AC-bias signal) switches its state[cite: 252]. [cite_start]When the counter reaches zero, the `ACB` bit in the `IRQSTATUS_RAW` register is set, which will deliver an interrupt signal to the system interrupt controller (if the interrupt is enabled.)[cite: 253]. [cite_start]The counter reloads the value in field `ACB_I`, but does not start to decrement until the `ACB` bit is cleared by writing 1 to this bit in the `IRQSTATUS` register[cite: 253].
+5.  [cite_start]**Frame transfer completed:** When one frame of data is transferred completely, the `DONE` bit in the `IRQSTATUS_RAW` register is set[cite: 254]. Note that the `EOF0` and `EOF1` bits in the `IRQSTATUS_RAW` register will be set accordingly[cite: 255]. [cite_start]This bit is cleared by writing a 1 to the corresponding interrupt in the `IRQSTATUS` register[cite: 256].
+
+[cite_start]Note that the interrupt enable bits are in the `IRQENABLE_SET` register[cite: 257]. The corresponding enable bit must be set in order to generate an interrupt to the CPU[cite: 258]. However, the `IRQSTATUS_RAW` register reflects the interrupt signal regardless of the interrupt enable bits settings[cite: 259].
+
+##### 13.3.4.1.3 Interrupt Handling
+[cite_start]See Chapter 6, Interrupts, for information about LCD interrupt number to CPU[cite: 261]. [cite_start]The interrupt service routine needs to determine the interrupt source by examining the `IRQSTATUS_RAW` register and clearing the interrupt properly[cite: 262].
+
+---
+
+### 13.3.5 LIDD Controller
+
+[cite_start]The LIDD Controller is designed to support LCD panels with a memory-mapped interface[cite: 264]. [cite_start]The types of displays range from low-end character monochrome LCD panels to high-end TFT smart LCD panels[cite: 265].
+
+[cite_start]LIDD mode (and the use of this logic) is enabled by clearing the `MODESEL` bit in the LCD control register (`LCD_CTRL`)[cite: 266]. [cite_start]LIDD Controller operation is summarized as follows: [cite: 267]
+
+* [cite_start]During initialization, the LCD LIDD CS0/CS1 configuration registers (`LIDD_CS0_CONF` and `LIDD_CS1_CONF`) are configured to match the requirements of the LCD panel being used[cite: 268].
+* [cite_start]During normal operation, the CPU writes display data to the LCD data registers (`LIDD_CS0_DATA` and `LIDD_CS1_DATA`)[cite: 275]. [cite_start]The LIDD interface converts the CPU write into the proper signal transition sequence for the display, as programmed earlier[cite: 276].
+* [cite_start]Note that the first CPU write should send the beginning address of the update to the LCD panel and the subsequent writes update data at display locations starting from the first address and continuing sequentially[cite: 277]. [cite_start]Note that DMA may be used instead of CPU[cite: 278].
+
+[cite_start]The LIDD Controller is also capable of reading back status or data from the LCD panel, if the latter has this capability[cite: 279]. [cite_start]This is set up and activated in a similar manner to the write function described above[cite: 280].
+
+[cite_start]**NOTE:** If an LCD panel is not used, this interface can be used to control any MCU-like peripheral[cite: 281]. [cite_start]See your device-specific data manual to check the LIDD features supported by the LCD controller[cite: 282].
+
+[cite_start]Table 13-6 describes how the signals are used to interface external LCD modules, which are configured by the `LIDD_CTRL` register[cite: 283].
+
+**Table 13-6. LIDD I/O Name Map**
+
+| Interface Type / Display Type | `LIDD_CTRL[2:0]` | I/O Name | Data Bits | Display I/O Name | Comment |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Character Display**<br>HD44780 Type | `100` | `LCD_DATA[7:4]`<br>`LCD_AC_BIAS_EN`<br>`LCD_HSYNC`<br>`LCD_VSYNC`<br>`LCD_MCLK` | 4 | DATA[7:4]<br>E (or E0)<br>R/W<br>RS<br>E1 | [cite_start]Data Bus (length defined by Instruction)<br>Enable Strobe (first display)<br>ReadWrite/<br>Register Select (Data/not Instruction)<br>Enable Strobe (second display optional) [cite: 285] |
+| **Character Display**<br>HD44780 Type | `100` | `LCD_DATA[7:0]`<br>`LCD_AC_BIAS_EN`<br>`LCD_HSYNC`<br>`LCD_VSYNC`<br>`LCD_MCLK` | 8 | DATA[7:0]<br>E (or E0)<br>R/W<br>RS<br>E1 | [cite_start]Data Bus (length defined by Instruction)<br>Enable Strobe (first display)<br>ReadWrite/<br>Register Select (Data/not Instruction)<br>Enable Strobe (second display optional) [cite: 285] |
+| **Micro Interface Graphic Display**<br>6800 Family | `001`<br>`000` | `LCD_DATA[15:0]`<br>`LCD_PCLK`<br>`LCD_HSYNC`<br>`LCD_VSYNC`<br>`LCD_AC_BIAS_EN`<br>`LCD_MCLK`<br>`LCD_MCLK` | Up to 16 | DATA[15:0]<br>E<br>R/W<br>A0<br>CS (or CS0)<br>CS1<br>None | [cite_start]Data Bus (16 bits always available)<br>Enable Clock<br>ReadWrite/<br>Address/Data Select<br>Chip Select (first display)<br>Chip Select (second display optional)<br>Synchronous Clock (optional) [cite: 285] |
+| **Micro Interface Graphic Display**<br>8080 Family | `011`<br>`010` | `LCD_DATA[15:0]`<br>`LCD_PCLK`<br>`LCD_HSYNC`<br>`LCD_VSYNC`<br>`LCD_AC_BIAS_EN`<br>`LCD_MCLK`<br>`LCD_MCLK` | Up to 16 | DATA[15:0]<br>RD<br>WR<br>A0<br>CS (or CS0)<br>CS1<br>None | [cite_start]Data Bus (16 bits always available)<br>Read Strobe<br>Write Strobe<br>Address/Data Select<br>Chip Select (first display)<br>Chip Select (second display optional)<br>Synchronous Clock (optional) [cite: 285] |
+
+---
+
+#### 13.3.5.1 LIDD Controller Timing
+
+[cite_start]The timing parameters are defined by the `LIDD_CS0_CONF` and `LIDD_CS1_CONF` registers, which are described in and[cite: 292]. [cite_start]The timing configuration is based on an internal reference clock, MCLK[cite: 293]. [cite_start]The MCLK is generated out of `LCD_CLK`, which is determined by the `CLKDIV` bit in the `LCD_CTRL` register[cite: 294].
+
+[cite_start]$MCLK = LCD\_CLK$ when $CLKDIV = 0$. [cite: 296]
+[cite_start]$MCLK = \frac{LCD\_CLK}{CLKDIV}$ when $CLKDIV \neq 0$. [cite: 299]
+
+[cite_start]See your device-specific data manual for the timing configurations supported by the LCD controller[cite: 300].
+
+[Figure: Figure 13-4. LIDD Mode HD44780 Write Timing Diagram. [cite_start]Displays waveforms for MCLK, LCD_DATA, LCD_PCLK, LCD_VSYNC, LCD_HSYNC, and LCD_AC_BIAS_EN during a write sequence[cite: 302].]
+
+[Figure: Figure 13-5. LIDD Mode HD44780 Read Timing Diagram. [cite_start]Displays waveforms for MCLK, LCD_DATA, LCD_PCLK, LCD_VSYNC, LCD_HSYNC, and LCD_AC_BIAS_EN during a read sequence[cite: 331].]
+
+[Figure: Figure 13-6. LIDD Mode 6800 Write Timing Diagram. [cite_start]Details write timing states including W_SU, W_STROBE, W_HOLD, and CS_DELAY[cite: 359].]
+
+[Figure: Figure 13-7. LIDD Mode 6800 Read Timing Diagram. [cite_start]Details read timing states including R_SU, R_STROBE, R_HOLD, and CS_DELAY[cite: 407].]
+
+[Figure: Figure 13-8. LIDD Mode 6800 Status Timing Diagram. [cite_start]Details status read timings[cite: 422].]
+
+[Figure: Figure 13-9. LIDD Mode 8080 Write Timing Diagram. [cite_start]Details 8080-specific write timing sequences[cite: 430].]
+
+[Figure: Figure 13-10. LIDD Mode 8080 Read Timing Diagram. [cite_start]Details 8080-specific read timing sequences[cite: 465].]
+
+[Figure: Figure 13-11. LIDD Mode 8080 Status Timing Diagram. [cite_start]Details 8080-specific status timings[cite: 489].]
+
+[cite_start]**NOTE:** The `CS_DELAY` in above figures is same as bit field `TA` in `LCDLIDDCSOCONFIG`[cite: 501].
+
+### 13.3.6 Raster Controller
+
+[cite_start]Raster mode (and the use of this logic) is enabled by setting the `MODESEL` bit in the LCD control register (`LCD_CTRL`)[cite: 515]. [cite_start]Table 13-7 shows the active external signals when this mode is active[cite: 516].
+
+**Table 13-7. [cite_start]Operation Modes Supported by Raster Controller** [cite: 517, 518]
+
+| Interface | Data Bus Width | Register Bits (`RASTER_CTRL[9, 7, 1]`) | Signal Name | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **Passive (STN) Mono 4-bit** | 4 | `001` | `LCD_DATA[3:0]`<br>`LCD_PCLK`<br>`LCD_HSYNC`<br>`LCD_VSYNC`<br>`LCD_AC_BIAS_EN`<br>`LCD_MCLK` | Data bus<br>Pixel clock<br>Horizontal clock(Line Clock)<br>Vertical clock (Frame Clock)<br>AC Bias<br>Not used |
+| **Passive (STN) Mono 8-bit** | 8 | `101` | `LCD_DATA[7:0]`<br>`LCD_PCLK`<br>`LCD_HSYNC`<br>`LCD_VSYNC`<br>`LCD_AC_BIAS_EN`<br>`LCD_MCLK` | Data bus<br>Pixel clock<br>Horizontal clock(Line Clock)<br>Vertical clock (Frame Clock)<br>AC Bias<br>Not used |
+| **Passive (STN) Color** | 8 | `100` | `LCD_DATA[7:0]`<br>`LCD_PCLK`<br>`LCD_HSYNC`<br>`LCD_VSYNC`<br>`LCD_AC_BIAS_EN`<br>`LCD_MCLK` | Data bus<br>Pixel clock<br>Horizontal clock(Line Clock)<br>Vertical clock (Frame Clock)<br>AC Bias<br>Not used |
+| **Active (TFT) Color** | 16 | `x10` | `LCD_DATA[15:0]`<br>`LCD_PCLK`<br>`LCD_HSYNC`<br>`LCD_VSYNC`<br>`LCD_AC_BIAS_EN`<br>`LCD_MCLK` | Data bus<br>Pixel clock<br>Horizontal clock(Line Clock)<br>Vertical clock (Frame Clock)<br>Output enable<br>Not used |
+
+---
+
+#### 13.3.6.1 Logical Data Path
+
+[cite_start]The block diagram of the Raster Controller is shown in Figure 13-1[cite: 526]. [cite_start]Figure 13-12 illustrates its logical data path for various operation modes (passive (STN) versus active (TFT), various BPP size)[cite: 527]. 
+
+[Figure: Figure 13-12. Logical Data Path for Raster Controller. [cite_start]Displays data flow from Data source (frame buffers) to Input FIFO, branching into STN (passive) and TFT (active) paths, passing through Palette, Gray-scaler/serializer, and Output FIFO to the Output pins] [cite: 531-546].
+
+Figure 13-12 shows that:
+* The gray-scaler/serializer and output FIFO blocks are bypassed in active (TFT) modes[cite: 529].
+* [cite_start]The palette is bypassed in both 12- and 16-BPP modes[cite: 530].
+
+**In summary:**
+* [cite_start]The display image is stored in frame buffers[cite: 548].
+* The built-in DMA engine constantly transfers the data stored in the frame buffers to the Input FIFO[cite: 549].
+* [cite_start]The Raster Controller relays data to the external pins according to the specified format[cite: 550].
+
+[cite_start]The remainder of this section describes the functioning blocks in Figure 13-12, including frame buffers, palette, and gray-scaler/serializer[cite: 551]. [cite_start]Their operation and programming techniques are covered in detail[cite: 551]. [cite_start]The output format is also described in Section 13.3.6.5[cite: 552].
+
+---
+
+#### 13.3.6.2 Frame Buffer
+
+[cite_start]A frame buffer is a contiguous memory block, storing enough data to fill a full LCD screen[cite: 561]. [cite_start]For this device, external memory needs to be used for the frame buffer[cite: 562]. [cite_start]For specific details on which external memory interface (EMIF) controller can be accessed by the LCD controller, see your device-specific data manual[cite: 563]. 
+
+[cite_start]The data in the frame buffer consists of pixel values as well as a look-up palette[cite: 564]. 
+
+[Figure: Figure 13-13. Frame Buffer Structure. For 1, 2, 4, 12, 16, 24 BPP Modes: Palette is 32 bytes followed by Pixel Data. [cite_start]For 8 BPP Mode: Palette is 512 bytes followed by Pixel Data] [cite: 566-576].
+
+**NOTE:**
+* [cite_start]8-BPP mode uses the first 512 bytes in the frame buffer as the palette while the other modes use 32 bytes[cite: 577].
+* 12-, 16-, and 24-BPP modes do not need a palette; i.e., the pixel data is the desired RGB value[cite: 578]. However, the first 32 bytes are still considered a palette[cite: 579]. The first entry should be `4000h` (bit 14 is 1) while the remaining entries must be filled with 0[cite: 580]. 
+* [cite_start]Each entry in a palette occupies 2 bytes[cite: 581]. [cite_start]As a result, 8-BPP mode palette has 256 color entries while the other palettes have up to 16 color entries[cite: 581].
+* 4-BPP mode uses up all the 16 entries in a palette[cite: 582].
+* [cite_start]1-BPP mode uses the first 2 entries in a palette while 2-BPP mode uses the first 4 entries[cite: 583]. [cite_start]The remaining entries are not used and must be filled with 0[cite: 584].
+* In 12- and 16-BPP modes, pixel data is RGB data[cite: 585]. For all the other modes, pixel data is actually an index of the palette entry[cite: 586].
+
+**Table 13-8. [cite_start]Bits-Per-Pixel Encoding for Palette Entry 0 Buffer** [cite: 592, 593]
+
+| Bit (14-12) Name: `BPP` | Value | Description |
+| :--- | :--- | :--- |
+| `000` | 1 BPP | Eight 1-bit pixels. |
+| `001` | 2 BPP | Four 2-bit pixels. |
+| `010` | 4 BPP | Two 4-bit pixels. |
+| `011` | 8 BPP | Packed into each byte. |
+| `1xx` | 12 BPP | 12 BPP in passive mode (`TFT_STN = 0` and `STN_565 = 0` in `RASTER_CTRL`). |
+| `1xx` | 16 BPP | 16 BPP in passive mode (`TFT_STN = 0` and `STN_565 = 1` in `RASTER_CTRL`). |
+| `1xx` | 16 BPP | 16 BPP in active mode (`LCDTFT = 1` and `TFT24 = 0` in `RASTER_CTRL`). |
+| `1xx` | 24 BPP | 24 BPP in active mode (`LCDTFT = 1` and `TFT24 = 1` in `RASTER_CTRL`). |
+
+[cite_start]*Note 1: Eight 1-bit pixels, four 2-bit pixels, and two 4-bit pixels are packed into each byte, and 12-bit pixels are right justified on (16-bit) word boundaries (in the same format as palette entry)[cite: 596].*
+[cite_start]*Note 2: For Raw Data (12/16/24 bpp) framebuffers, no Palette lookup is employed therefore `PALMODE = 0x10` in `RASTER_CTRL`[cite: 600].*
+
+[cite_start]The equations shown in Table 13-9 are used to calculate the total frame buffer size (in bytes) based on varying pixel size encoding and screen sizes[cite: 601].
+
+**Table 13-9. [cite_start]Frame Buffer Size According to BPP** [cite: 603, 604]
+
+| BPP | Frame Buffer Size (Formula) |
+| :--- | :--- |
+| 1 | $32 + (Lines \times Columns) / 8$ |
+| 2 | $32 + (Lines \times Columns) / 4$ |
+| 4 | $32 + (Lines \times Columns) / 2$ |
+| 8 | $512 + (Lines \times Columns)$ |
+| 12 / 16 | $32 + 2 \times (Lines \times Columns)$ |
+
+##### Memory Organization within Frame Buffer
+
+[cite_start]Figure 13-14 and Figure 13-15 show more detail of the palette entry organization[cite: 602]. [cite_start]Figure 13-16 through Figure 13-21 show the memory organization within the frame buffer for each pixel encoding size[cite: 714].
+
+[Figure: Figure 13-14. 16-Entry Palette/Buffer Format (1, 2, 4, 12, 16 BPP) and Figure 13-15. 256-Entry Palette/Buffer Format (8 BPP). [cite_start]Shows bit breakdowns for Red, Green, Blue, and Mono values, along with Base address offsets.] [cite: 611-711].
+
+* **Figure 13-16. [cite_start]16-BPP Data Memory Organization (TFT Mode Only)-Little Endian:** Base = Pixel 0, Base + 2 = Pixel 1 [cite: 715, 736-738].
+* **Figure 13-17. [cite_start]12-BPP Data Memory Organization-Little Endian:** Unused [15-12] bits are filled with zeroes in TFT mode[cite: 745, 771].
+* **Figure 13-18. [cite_start]8-BPP Data Memory Organization:** Base = Pixel 0, Base + 1 = Pixel 1, Base + 2 = Pixel 2 [cite: 772, 786-791].
+* **Figure 13-19. 4-BPP Data Memory Organization:** Base = Pixel 0, Pixel 1; Base + 1 = Pixel 2, Pixel 3 [cite: 792, 804-809].
+
+**Table: Figure 13-20. [cite_start]2-BPP Data Memory Organization** [cite: 818, 819]
+
+| Memory Address | Bits 7-6 | Bits 5-4 | Bits 3-2 | Bits 1-0 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Base** | Pixel 0 | Pixel 1 | Pixel 2 | Pixel 3 |
+| **Base + 1** | Pixel 4 | Pixel 5 | Pixel 6 | Pixel 7 |
+| **Base + 2** | Pixel 8 | Pixel 9 | Pixel 10 | Pixel 11 |
+
+**Table: Figure 13-21. [cite_start]1-BPP Data Memory Organization** [cite: 820, 821]
+
+| Memory Address | Bit 7 | Bit 6 | Bit 5 | Bit 4 | Bit 3 | Bit 2 | Bit 1 | Bit 0 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Base** | P0 | P1 | P2 | P3 | P4 | P5 | P6 | P7 |
+| **Base + 1** | P8 | P9 | P10 | P11 | P12 | P13 | P14 | P15 |
+
+---
+
+#### 13.3.6.3 Palette
+
+As explained in the previous section, the pixel data is an index of palette entry (when palette is used)[cite: 825]. The number of colors supported is given by $2^{BPP}$[cite: 826]. However, due to a limitation of the gray-scaler/serializer block, fewer grayscales or colors may be supported[cite: 826, 827].
+
+The `PLM` field (in `RASTER_CTRL`) affects the palette loading[cite: 828]:
+* [cite_start]If `PLM` is `00b` (palette-plus-data mode) or `01b` (palette-only mode), the palette is loaded by the DMA engine at the very beginning, which is followed by the loading of pixel data[cite: 829].
+* If `PLM` is `10b` (data-only mode), the palette is not loaded. [cite_start]Instead, the DMA engine loads the pixel data immediately[cite: 830].
+
+---
+
+#### 13.3.6.4 Gray-Scaler/Serializer
+
+##### 13.3.6.4.1 Passive (STN) Mode
+[cite_start]Once a palette entry is selected from the look-up palette by the pixel data, its content is sent to the gray-scaler/serializer[cite: 833]. 
+* [cite_start]If it is monochrome data, it is encoded as 4 bits[cite: 834]. 
+* If it is color data, it is encoded as 4 bits (Red), 4 bits (Green), and 4 bits (Blue)[cite: 835]. 
+
+These 4-bit values are used to select one of the 16 intensity levels, as shown in Table 13-10[cite: 836]. A patented algorithm is used during this processing to provide an optimized intensity value that matches the eye's visual perception of color/gray gradations[cite: 837].
+
+##### 13.3.6.4.2 Active (TFT) Mode
+The gray-scaler/serializer is bypassed[cite: 839].
+
+**Table 13-10. [cite_start]Color/Grayscale Intensities and Modulation Rates** [cite: 846, 847]
+
+| Dither Value (4-Bit Value from Palette) | Intensity (0% is White) | Modulation Rate (Ratio of ON to ON+OFF Pixels) |
+| :--- | :--- | :--- |
+| `0000` | 0.0% | 0 |
+| `0001` | 14.3% | $1/7$ |
+| `0010` | 20.0% | $1/5$ |
+| `0011` | 25% | $1/4$ |
+| `0100` | 33.3% | $3/9$ |
+| `0101` | 40.0% | $2/5$ |
+| `0110` | 44.4% | $4/9$ |
+| `0111` | 50.0% | $1/2$ |
+| `1000` | 55.6% | $5/9$ |
+| `1001` | 60.0% | $3/5$ |
+| `1010` | 66.6% | $6/9$ |
+| `1011` | 75% | $3/4$ |
+| `1100` | 80.0% | $4/5$ |
+| `1101` | 85.7% | $6/7$ |
+| `1110` | 93.3% | $14/15$ |
+| `1111` | 100.0% | 1 |
+
+---
+
+#### 13.3.6.4.3 Summary of Color Depth
+
+**Table 13-11. [cite_start]Number of Colors/Shades of Gray Available on Screen** [cite: 848, 850]
+
+| Number of BPP | Passive Mode (`LCDTFT = 0`) Monochrome (`LCDBW = 1`) / Color (`LCDBW = 0`) | Active Mode (`LCDTFT = 1`) Color Only (`LCDBW = 0`) |
+| :--- | :--- | :--- |
+| **1** | 2 palette entries to select within 15 grayscales / 2 palette entries to select within 3375 possible colors | 2 palette entries to select within 4096 possible colors |
+| **2** | 4 palette entries to select within 15 grayscales / 4 palette entries to select within 3375 possible colors | 4 palette entries to select within 4096 possible colors |
+| **4** | 16 palette entries to select within 15 grayscales / 16 palette entries to select within 3375 possible colors | 16 palette entries to select within 4096 possible colors |
+| **8** | Not relevant since it would consist in 256 palette entries to select within 15 grayscales, but exists anyway / 256 palette entries to select 3375 possible colors | 256 palette entries to select within 4096 possible colors |
+| **12** | 3375 possible colors / X | 4096 possible colors |
+| **16** | 3375 possible colors (`STN_565 = 1`) / X | Up to 65536 possible colors |
+| **24** | X / X | Up to 16.7 million colors |
