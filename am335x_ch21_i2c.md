@@ -356,3 +356,53 @@ The following tables detail the connectivity and resource allocation for the I2C
 
 ---
 [cite_start]*Source: SPRUH73Q—October 2011—Revised December 2019, Texas Instruments Incorporated.* [cite: 661, 662]
+## 21.4.1.1 I2C_REVNB_LO Register (offset = 0h) [reset = 0h]
+
+[cite_start]This read-only register contains the hard-coded revision number of the module[cite: 672]. [cite_start]A write to this register has no effect[cite: 672]. 
+* [cite_start]I2C controller with interrupt using interrupt vector register (`I2C_IV`) is revision 1.x[cite: 673]. 
+* [cite_start]I2C controller with interrupt using status register bits (`I2C_IRQSTATUS_RAW`) is revision 2.x[cite: 674].
+
+
+### Table 21-9. I2C_REVNB_LO Register Field Descriptions
+| Bit | Field | Type | Reset | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **31-16** | RESERVED | R | 0h | [cite_start]Reserved[cite: 679]. |
+| **15-11** | RTL | R | 0h | [cite_start]RTL version[cite: 679]. |
+| **10-8** | MAJOR | R | 0h | [cite_start]Major Revision[cite: 679]. [cite_start]This field changes when there is a major feature change[cite: 679]. [cite_start]This field does not change due to a bug fix or minor feature change[cite: 679]. |
+| **7-6** | CUSTOM | R | 0h | [cite_start]Indicates a special version for a particular device[cite: 679]. [cite_start]Consequence of use may avoid use of standard Chip Support Library (CSL) / Drivers[cite: 679]. [cite_start]0 if non-custom[cite: 679]. |
+| **5-0** | MINOR | R | 0h | [cite_start]Minor Revision[cite: 679]. [cite_start]This field changes when features are scaled up or down[cite: 679]. [cite_start]This field does not change due to a bug fix or major feature change[cite: 679]. |
+[cite_start]*(LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; -n = value after reset)* [cite: 677]
+
+---
+
+## 21.4.1.2 I2C_REVNB_HI Register (offset = 4h) [reset = 0h]
+
+[cite_start]A reset has no effect on the value returned[cite: 688].
+
+### Table 21-10. I2C_REVNB_HI Register Field Descriptions
+| Bit | Field | Type | Reset | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **31-16** | RESERVED | R | 0h | [cite_start]Reserved[cite: 694]. |
+| **15-14** | SCHEME | R | 0h | [cite_start]Used to distinguish between old Scheme and current[cite: 694]. [cite_start]Spare bit to encode future schemes[cite: 694]. |
+| **13-12** | RESERVED | R | 0h | [cite_start]Reserved[cite: 694]. |
+| **11-0** | FUNC | R | 0h | [cite_start]Function: Indicates a software compatible module family[cite: 694]. |
+[cite_start]*(LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; -n = value after reset)* [cite: 692]
+
+---
+
+## 21.4.1.3 I2C_SYSC Register (offset = 10h) [reset = 0h]
+
+[cite_start]This register allows controlling various parameters of the peripheral interface[cite: 703].
+
+
+### Table 21-11. I2C_SYSC Register Field Descriptions
+| Bit | Field | Type | Reset | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **31-10** | RESERVED | R | 0h | [cite_start]Reserved[cite: 709]. |
+| **9-8** | CLKACTIVITY | R/W | 0h | [cite_start]Clock Activity selection bits[cite: 709]. [cite_start]Set to 1 to disable external clock gating mechanism in Idle Mode[cite: 709]. [cite_start]Values after reset are low[cite: 709]. [cite_start]<br><br>**Note:** If the System Clock is cut-off, the module will assert a WakeUp event when it asynchronously detects a Start Condition on the I2C Bus[cite: 709]. [cite_start]In this case, the first transfer will not be taken into account (NACK will be detected by the external master) [cite: 709][cite_start].<br><br>`0h` = Both clocks can be cut off [cite: 709][cite_start].<br>`1h` = Only Interface/OCP clock must be kept active; system clock can be cut off[cite: 709].<br>`2h` = Only system clock must be kept active; [cite_start]Interface/OCP clock can be cut off [cite: 709][cite_start].<br>`3h` = Both clocks must be kept active[cite: 709]. |
+| **7-5** | RESERVED | R | 0h | [cite_start]Reserved[cite: 709]. |
+| **4-3** | IDLEMODE | R/W | 0h | [cite_start]Idle Mode selection bits[cite: 709]. [cite_start]Used to select one of the idle mode operation mechanisms[cite: 709]. [cite_start]Value after reset is 00 (Force Idle) [cite: 709][cite_start].<br>`1h` = No Idle mode [cite: 709][cite_start].<br>`2h` = Smart Idle mode [cite: 709][cite_start].<br>`3h` = Smart-idle wakeup (Available only on I2C0)[cite: 709]. |
+| **2** | ENAWAKEUP | R/W | 0h | [cite_start]Enable Wakeup control bit[cite: 709]. [cite_start]When set to 1, the module enables its own wakeup mechanism[cite: 709]. [cite_start]Value after reset is low [cite: 709][cite_start].<br>`0h` = Wakeup mechanism is disabled [cite: 709][cite_start].<br>`1h` = Wakeup mechanism is enabled[cite: 709]. |
+| **1** | SRST | R/W | 0h | [cite_start]SoftReset bit[cite: 718]. [cite_start]When set to 1, entire module is reset as for the hardware reset[cite: 718]. [cite_start]Automatically cleared to 0 by the core; only reset by hardware reset[cite: 718]. [cite_start]During reads, it always returns 0 [cite: 718][cite_start].<br>`0h` = Normal mode [cite: 718][cite_start].<br>`1h` = The module is reset[cite: 718]. |
+| **0** | AUTOIDLE | R/W | 0h | [cite_start]Autoidle bit[cite: 718]. [cite_start]When set to 1, the module activates its own idle mode mechanism[cite: 718]. [cite_start]By evaluating its internal state, the module can decide to gate part of its internal clock tree to improve power consumption [cite: 718][cite_start].<br>`0h` = Auto Idle mechanism is disabled [cite: 718][cite_start].<br>`1h` = Auto Idle mechanism is enabled[cite: 718]. |
+[cite_start]*(LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; -n = value after reset)* [cite: 708]
